@@ -1,0 +1,9 @@
+{
+  "enabledMcpjsonServers": [
+    "obsidian-mnemosyne",
+    "obsidian-field-notes",
+    "obsidian-cursus-opus",
+    "obsidian-grimoire-arcanum",
+    "obsidian-phylactery"
+  ]
+}

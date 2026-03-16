@@ -1,0 +1,11 @@
+# Build output
+main.js
+
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+
+# npm debug
+npm-debug.log*

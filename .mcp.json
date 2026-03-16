@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "obsidian-mnemosyne": {
+      "command": "npx",
+      "args": ["-y", "@bitbonsai/mcpvault@latest", "/Users/merkel/Library/CloudStorage/SynologyDrive-obsidian/mnemosyne"],
+      "env": {}
+    },
+    "obsidian-field-notes": {
+      "command": "npx",
+      "args": ["-y", "@bitbonsai/mcpvault@latest", "/Users/merkel/Library/CloudStorage/SynologyDrive-obsidian/field-notes"],
+      "env": {}
+    },
+    "obsidian-cursus-opus": {
+      "command": "npx",
+      "args": ["-y", "@bitbonsai/mcpvault@latest", "/Users/merkel/Library/CloudStorage/SynologyDrive-obsidian/cursus-opus"],
+      "env": {}
+    },
+    "obsidian-grimoire-arcanum": {
+      "command": "npx",
+      "args": ["-y", "@bitbonsai/mcpvault@latest", "/Users/merkel/Library/CloudStorage/SynologyDrive-obsidian/grimoire-arcanum"],
+      "env": {}
+    },
+    "obsidian-phylactery": {
+      "command": "npx",
+      "args": ["-y", "@bitbonsai/mcpvault@latest", "/Users/merkel/Library/CloudStorage/SynologyDrive-obsidian/phylactery"],
+      "env": {}
+    }
+  }
+}
