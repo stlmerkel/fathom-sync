@@ -2,6 +2,9 @@
 
 An Obsidian plugin that syncs your [Fathom AI](https://fathom.video) meeting recordings into your vault as structured markdown notes — complete with AI summaries, transcripts, action items, and attendee info.
 
+## AI Usage
+This plugin was 100% vibe coded. This is only intended for my personal use and I don't take issues or pull requests.
+
 ## Features
 
 - **Full meeting sync** — paginated fetch of all meetings from the Fathom API
