@@ -99,6 +99,13 @@ const DEFAULT_SETTINGS: FathomSyncSettings = {
 
 const BASE_URL = 'https://api.fathom.ai/external/v1';
 
+class FathomLockedError extends Error {
+	constructor(path: string) {
+		super(`Recording still processing (${path})`);
+		this.name = 'FathomLockedError';
+	}
+}
+
 // ─── Plugin ─────────────────────────────────────────────────────────────────
 
 export default class FathomSyncPlugin extends Plugin {
@@ -161,8 +168,12 @@ export default class FathomSyncPlugin extends Plugin {
 			headers: { 'X-Api-Key': this.settings.apiKey },
 		});
 
+		if (resp.status === 423) {
+			throw new FathomLockedError(path);
+		}
+
 		if (resp.status !== 200) {
-			throw new Error(`Fathom API error ${resp.status}: ${resp.text}`);
+			throw new Error(`Fathom API error ${resp.status} on ${path}: ${resp.text}`);
 		}
 
 		return resp.json as T;
@@ -179,9 +190,18 @@ export default class FathomSyncPlugin extends Plugin {
 			if (cursor) params['cursor'] = cursor;
 			if (createdAfter) params['created_after'] = createdAfter;
 
-			const resp = await this.apiGet<FathomListResponse>('/meetings', params);
-			all.push(...resp.items);
-			cursor = resp.next_cursor ?? undefined;
+			try {
+				const resp = await this.apiGet<FathomListResponse>('/meetings', params);
+				all.push(...resp.items);
+				cursor = resp.next_cursor ?? undefined;
+			} catch (e) {
+				if (e instanceof FathomLockedError) {
+					console.log('Fathom Sync: Meetings endpoint returned 423, retrying in 2s...');
+					await new Promise(resolve => setTimeout(resolve, 2000));
+					continue;
+				}
+				throw e;
+			}
 		} while (cursor);
 
 		return all;
@@ -219,8 +239,10 @@ export default class FathomSyncPlugin extends Plugin {
 		new Notice('Fathom Sync: Fetching all meetings...');
 		try {
 			const meetings = await this.fetchAllMeetings();
-			await this.processMeetings(meetings);
-			new Notice(`Fathom Sync: Done — processed ${meetings.length} meeting(s).`);
+			const { created, skipped } = await this.processMeetings(meetings);
+			const parts = [`${created} new`];
+			if (skipped > 0) parts.push(`${skipped} still processing`);
+			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
 		} catch (e) {
 			new Notice(`Fathom Sync: Error — ${e instanceof Error ? e.message : String(e)}`);
 		}
@@ -235,19 +257,41 @@ export default class FathomSyncPlugin extends Plugin {
 		new Notice(`Fathom Sync: Fetching meetings from the last ${days} days...`);
 		try {
 			const meetings = await this.fetchAllMeetings(after);
-			await this.processMeetings(meetings);
-			new Notice(`Fathom Sync: Done — processed ${meetings.length} meeting(s).`);
+			const { created, skipped } = await this.processMeetings(meetings);
+			const parts = [`${created} new`];
+			if (skipped > 0) parts.push(`${skipped} still processing`);
+			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
 		} catch (e) {
 			new Notice(`Fathom Sync: Error — ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
-	private async processMeetings(meetings: FathomMeeting[]) {
+	private async processMeetings(meetings: FathomMeeting[]): Promise<{ created: number; existed: number; skipped: number }> {
 		await this.ensureFolder(this.settings.meetingFolder);
 
+		let created = 0;
+		let existed = 0;
+		let skipped = 0;
+
 		for (const meeting of meetings) {
-			await this.createOrUpdateMeetingNote(meeting);
+			try {
+				const wasCreated = await this.createOrUpdateMeetingNote(meeting);
+				if (wasCreated) {
+					created++;
+				} else {
+					existed++;
+				}
+			} catch (e) {
+				if (e instanceof FathomLockedError) {
+					skipped++;
+					console.log(`Fathom Sync: Skipping "${meeting.title}" — still processing`);
+				} else {
+					throw e;
+				}
+			}
 		}
+
+		return { created, existed, skipped };
 	}
 
 	private async ensureFolder(path: string) {
@@ -273,13 +317,13 @@ export default class FathomSyncPlugin extends Plugin {
 		);
 	}
 
-	private async createOrUpdateMeetingNote(meeting: FathomMeeting) {
+	private async createOrUpdateMeetingNote(meeting: FathomMeeting): Promise<boolean> {
 		const filename = this.buildFilename(meeting);
 		const filePath = `${this.settings.meetingFolder}/${filename}.md`;
 
 		// Skip if file already exists
 		const existing = this.app.vault.getAbstractFileByPath(filePath);
-		if (existing) return;
+		if (existing) return false;
 
 		// Fetch detailed data per-recording via dedicated endpoints
 		let summary: string | null = null;
@@ -297,6 +341,7 @@ export default class FathomSyncPlugin extends Plugin {
 
 		const content = this.buildNoteContent(meeting, summary, transcript, actionItems);
 		await this.app.vault.create(filePath, content);
+		return true;
 	}
 
 	private buildNoteContent(
