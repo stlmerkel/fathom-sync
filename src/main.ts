@@ -85,6 +85,7 @@ interface FathomSyncSettings {
 	includeActionItems: boolean;
 	fileNameFormat: string;
 	syncOnStartup: boolean;
+	lastSyncedAt: string | null;
 }
 
 const DEFAULT_SETTINGS: FathomSyncSettings = {
@@ -95,6 +96,7 @@ const DEFAULT_SETTINGS: FathomSyncSettings = {
 	includeActionItems: true,
 	fileNameFormat: '{{date}} — {{title}}',
 	syncOnStartup: false,
+	lastSyncedAt: null,
 };
 
 const BASE_URL = 'https://api.fathom.ai/external/v1';
@@ -116,31 +118,25 @@ export default class FathomSyncPlugin extends Plugin {
 		this.addSettingTab(new FathomSyncSettingTab(this.app, this));
 
 		this.addRibbonIcon('video', 'Sync Fathom meetings', () => {
-			this.syncAllMeetings();
+			this.syncNewMeetings();
+		});
+
+		this.addCommand({
+			id: 'sync-new-meetings',
+			name: 'Sync new meetings',
+			callback: () => this.syncNewMeetings(),
 		});
 
 		this.addCommand({
 			id: 'sync-all-meetings',
-			name: 'Sync all meetings',
+			name: 'Sync all meetings (full re-sync)',
 			callback: () => this.syncAllMeetings(),
-		});
-
-		this.addCommand({
-			id: 'sync-recent-meetings',
-			name: 'Sync recent meetings (last 7 days)',
-			callback: () => this.syncRecentMeetings(7),
-		});
-
-		this.addCommand({
-			id: 'sync-recent-30',
-			name: 'Sync recent meetings (last 30 days)',
-			callback: () => this.syncRecentMeetings(30),
 		});
 
 		if (this.settings.syncOnStartup && this.settings.apiKey) {
 			// Delay to let vault fully load
 			this.registerInterval(
-				window.setTimeout(() => this.syncRecentMeetings(7), 5000) as unknown as number
+				window.setTimeout(() => this.syncNewMeetings(), 5000) as unknown as number
 			);
 		}
 	}
@@ -163,20 +159,40 @@ export default class FathomSyncPlugin extends Plugin {
 			}
 		}
 
-		const resp = await requestUrl({
-			url: url.toString(),
-			headers: { 'X-Api-Key': this.settings.apiKey },
-		});
+		const maxRetries = 3;
+		for (let attempt = 0; attempt <= maxRetries; attempt++) {
+			const resp = await requestUrl({
+				url: url.toString(),
+				headers: { 'X-Api-Key': this.settings.apiKey },
+			});
 
-		if (resp.status === 423) {
-			throw new FathomLockedError(path);
+			if (resp.status === 429) {
+				if (attempt < maxRetries) {
+					const wait = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+					console.log(`Fathom Sync: Rate limited on ${path}, waiting ${wait / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+					await this.delay(wait);
+					continue;
+				}
+				throw new Error(`Fathom API rate limited on ${path} after ${maxRetries} retries`);
+			}
+
+			if (resp.status === 423) {
+				throw new FathomLockedError(path);
+			}
+
+			if (resp.status !== 200) {
+				throw new Error(`Fathom API error ${resp.status} on ${path}: ${resp.text}`);
+			}
+
+			return resp.json as T;
 		}
 
-		if (resp.status !== 200) {
-			throw new Error(`Fathom API error ${resp.status} on ${path}: ${resp.text}`);
-		}
+		// Unreachable, but TypeScript needs it
+		throw new Error(`Fathom API: unexpected state on ${path}`);
+	}
 
-		return resp.json as T;
+	private delay(ms: number): Promise<void> {
+		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 
 	private async fetchAllMeetings(createdAfter?: string): Promise<FathomMeeting[]> {
@@ -231,15 +247,32 @@ export default class FathomSyncPlugin extends Plugin {
 
 	// ─── Sync logic ───────────────────────────────────────────────────────
 
-	async syncAllMeetings() {
+	async syncNewMeetings() {
 		if (!this.settings.apiKey) {
 			new Notice('Fathom Sync: Please set your API key in settings.');
 			return;
 		}
-		new Notice('Fathom Sync: Fetching all meetings...');
+
+		const since = this.settings.lastSyncedAt;
+		const label = since
+			? `since ${moment(since).format('MMM D, h:mm A')}`
+			: '(first sync)';
+		new Notice(`Fathom Sync: Checking for new meetings ${label}...`);
+
 		try {
-			const meetings = await this.fetchAllMeetings();
+			const meetings = await this.fetchAllMeetings(since ?? undefined);
 			const { created, skipped } = await this.processMeetings(meetings);
+
+			// Update lastSyncedAt to the most recent meeting's created_at
+			if (meetings.length > 0) {
+				const latest = meetings
+					.map(m => m.created_at)
+					.sort()
+					.pop()!;
+				this.settings.lastSyncedAt = latest;
+				await this.saveSettings();
+			}
+
 			const parts = [`${created} new`];
 			if (skipped > 0) parts.push(`${skipped} still processing`);
 			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
@@ -248,16 +281,25 @@ export default class FathomSyncPlugin extends Plugin {
 		}
 	}
 
-	async syncRecentMeetings(days: number) {
+	async syncAllMeetings() {
 		if (!this.settings.apiKey) {
 			new Notice('Fathom Sync: Please set your API key in settings.');
 			return;
 		}
-		const after = moment().subtract(days, 'days').toISOString();
-		new Notice(`Fathom Sync: Fetching meetings from the last ${days} days...`);
+		new Notice('Fathom Sync: Full re-sync — fetching all meetings...');
 		try {
-			const meetings = await this.fetchAllMeetings(after);
+			const meetings = await this.fetchAllMeetings();
 			const { created, skipped } = await this.processMeetings(meetings);
+
+			if (meetings.length > 0) {
+				const latest = meetings
+					.map(m => m.created_at)
+					.sort()
+					.pop()!;
+				this.settings.lastSyncedAt = latest;
+				await this.saveSettings();
+			}
+
 			const parts = [`${created} new`];
 			if (skipped > 0) parts.push(`${skipped} still processing`);
 			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
@@ -273,11 +315,14 @@ export default class FathomSyncPlugin extends Plugin {
 		let existed = 0;
 		let skipped = 0;
 
-		for (const meeting of meetings) {
+		for (let idx = 0; idx < meetings.length; idx++) {
+			const meeting = meetings[idx]!;
 			try {
 				const wasCreated = await this.createOrUpdateMeetingNote(meeting);
 				if (wasCreated) {
 					created++;
+					// Throttle between new notes to avoid rate limits
+					if (idx < meetings.length - 1) await this.delay(500);
 				} else {
 					existed++;
 				}
