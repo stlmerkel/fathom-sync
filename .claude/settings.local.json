@@ -1,14 +1,15 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh release:*)"
+    ]
+  },
   "enabledMcpjsonServers": [
     "obsidian-mnemosyne",
     "obsidian-field-notes",
     "obsidian-cursus-opus",
     "obsidian-grimoire-arcanum",
     "obsidian-phylactery"
-  ],
-  "permissions": {
-    "allow": [
-      "Bash(git:*)"
-    ]
-  }
+  ]
 }
