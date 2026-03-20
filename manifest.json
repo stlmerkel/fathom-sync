@@ -1,7 +1,7 @@
 {
   "id": "fathom-sync",
   "name": "Fathom Sync",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "minAppVersion": "1.0.0",
   "description": "Sync meeting notes from Fathom AI — summaries, transcripts, and action items.",
   "author": "merkel",

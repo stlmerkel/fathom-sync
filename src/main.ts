@@ -159,16 +159,37 @@ export default class FathomSyncPlugin extends Plugin {
 			}
 		}
 
-		const maxRetries = 3;
+		const maxRetries = 5;
 		for (let attempt = 0; attempt <= maxRetries; attempt++) {
-			const resp = await requestUrl({
-				url: url.toString(),
-				headers: { 'X-Api-Key': this.settings.apiKey },
-			});
+			let resp;
+			try {
+				resp = await requestUrl({
+					url: url.toString(),
+					headers: { 'X-Api-Key': this.settings.apiKey },
+					throw: false,
+				});
+			} catch (e: unknown) {
+				// requestUrl throws on network errors and non-2xx without throw:false
+				// Extract status from the error if possible
+				const status = (e as { status?: number })?.status;
+				if (status === 429) {
+					if (attempt < maxRetries) {
+						const wait = Math.pow(2, attempt + 1) * 1000;
+						console.log(`Fathom Sync: Rate limited on ${path}, waiting ${wait / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+						await this.delay(wait);
+						continue;
+					}
+					throw new Error(`Fathom API rate limited on ${path} after ${maxRetries} retries`);
+				}
+				if (status === 423) {
+					throw new FathomLockedError(path);
+				}
+				throw e;
+			}
 
 			if (resp.status === 429) {
 				if (attempt < maxRetries) {
-					const wait = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+					const wait = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s, 16s, 32s
 					console.log(`Fathom Sync: Rate limited on ${path}, waiting ${wait / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
 					await this.delay(wait);
 					continue;
@@ -193,6 +214,38 @@ export default class FathomSyncPlugin extends Plugin {
 
 	private delay(ms: number): Promise<void> {
 		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	/**
+	 * Scan existing meeting notes to recover lastSyncedAt when data.json is lost
+	 * (e.g. after reinstall or version upgrade). Reads the `date` frontmatter
+	 * field from files in the meeting folder and returns the latest one as an
+	 * ISO timestamp, or null if no notes exist.
+	 */
+	private recoverLastSyncDate(): string | null {
+		const folder = this.app.vault.getAbstractFileByPath(this.settings.meetingFolder);
+		if (!(folder instanceof TFolder)) return null;
+
+		let latestDate: string | null = null;
+
+		for (const file of folder.children) {
+			if (file.name.endsWith('.md')) {
+				const cache = this.app.metadataCache.getCache(file.path);
+				const date = cache?.frontmatter?.['date'];
+				if (date && typeof date === 'string') {
+					// Frontmatter stores YYYY-MM-DD; compare lexicographically
+					if (!latestDate || date > latestDate) {
+						latestDate = date;
+					}
+				}
+			}
+		}
+
+		if (!latestDate) return null;
+
+		// Convert YYYY-MM-DD to an ISO timestamp at end of day so we don't
+		// re-fetch meetings from that same day
+		return moment(latestDate).endOf('day').toISOString();
 	}
 
 	private async fetchAllMeetings(createdAfter?: string): Promise<FathomMeeting[]> {
@@ -251,6 +304,16 @@ export default class FathomSyncPlugin extends Plugin {
 		if (!this.settings.apiKey) {
 			new Notice('Fathom Sync: Please set your API key in settings.');
 			return;
+		}
+
+		// If lastSyncedAt is missing, try to recover it from existing notes
+		if (!this.settings.lastSyncedAt) {
+			const recovered = this.recoverLastSyncDate();
+			if (recovered) {
+				this.settings.lastSyncedAt = recovered;
+				await this.saveSettings();
+				console.log(`Fathom Sync: Recovered lastSyncedAt from existing notes: ${recovered}`);
+			}
 		}
 
 		const since = this.settings.lastSyncedAt;
@@ -322,7 +385,9 @@ export default class FathomSyncPlugin extends Plugin {
 				if (wasCreated) {
 					created++;
 					// Throttle between new notes to avoid rate limits
-					if (idx < meetings.length - 1) await this.delay(500);
+					// Each new note makes up to 2 API calls (summary + transcript),
+					// so space them out more generously
+					if (idx < meetings.length - 1) await this.delay(1500);
 				} else {
 					existed++;
 				}
@@ -378,6 +443,7 @@ export default class FathomSyncPlugin extends Plugin {
 			summary = await this.fetchSummary(meeting.recording_id);
 		}
 		if (this.settings.includeTranscript) {
+			if (this.settings.includeSummary) await this.delay(300);
 			transcript = await this.fetchTranscript(meeting.recording_id);
 		}
 
