@@ -5,5 +5,10 @@
     "obsidian-cursus-opus",
     "obsidian-grimoire-arcanum",
     "obsidian-phylactery"
-  ]
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(git:*)"
+    ]
+  }
 }
