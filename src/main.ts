@@ -42,13 +42,19 @@ interface FathomTranscriptItem {
 	timestamp: string;
 }
 
+interface FathomAssignee {
+	name: string | null;
+	email: string | null;
+	team: string | null;
+}
+
 interface FathomActionItem {
 	description: string;
 	user_generated: boolean;
 	completed: boolean;
 	recording_timestamp: string;
 	recording_playback_url: string;
-	assignee: string;
+	assignee: FathomAssignee | null;
 }
 
 interface FathomInvitee {
@@ -504,7 +510,10 @@ export default class FathomSyncPlugin extends Plugin {
 			lines.push('');
 			for (const item of actionItems) {
 				const checkbox = item.completed ? '- [x]' : '- [ ]';
-				const assignee = item.assignee ? ` *(${item.assignee})*` : '';
+				// assignee is an object ({name, email, team}, all nullable) — not a string.
+				// Interpolating it directly yields "[object Object]".
+				const assigneeName = item.assignee?.name || item.assignee?.email || '';
+				const assignee = assigneeName ? ` *(${assigneeName})*` : '';
 				const ts = item.recording_timestamp ? ` \`${item.recording_timestamp}\`` : '';
 				lines.push(`${checkbox} ${item.description}${assignee}${ts}`);
 			}

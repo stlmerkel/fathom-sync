@@ -76,7 +76,11 @@ Returns a paginated list of meetings with optional filtering and embedded data.
           "completed": false,
           "recording_timestamp": "00:12:45",
           "recording_playback_url": "https://...",
-          "assignee": "alice@acme.com"
+          "assignee": {              // object | null — NOT a string
+            "name": "Alice Johnson", // string | null
+            "email": "alice.johnson@acme.com", // string | null
+            "team": "Marketing"      // string | null
+          }
         }
       ],
 
