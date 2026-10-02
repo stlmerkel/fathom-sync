@@ -25,6 +25,6 @@ export function domainOf(email: string): string {
 export function domainFromWebsite(value: unknown): string {
 	if (typeof value !== 'string') return '';
 	let v = unquote(value).toLowerCase();
-	v = v.replace(/^[a-z]+:\/\//,'').replace(/^www\./, '');
+	v = v.replace(/^[a-z]+:\/\//, '').replace(/^www\./, '');
 	return v.split(/[/?#]/)[0] ?? '';
 }

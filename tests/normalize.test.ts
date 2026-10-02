@@ -10,8 +10,8 @@ describe('normalizeEmail', () => {
 		expect(normalizeEmail('"sbronson@maryville.edu"')).toBe('sbronson@maryville.edu');
 	});
 	it('strips NBSP, zero-width characters and a BOM that trim() leaves behind', () => {
-		expect(normalizeEmail('﻿sbronson@maryville.edu ')).toBe('sbronson@maryville.edu');
-		expect(normalizeEmail('sbron​son@maryville.edu')).toBe('sbronson@maryville.edu');
+		expect(normalizeEmail('\uFEFFsbronson@maryville.edu\u00A0')).toBe('sbronson@maryville.edu');
+		expect(normalizeEmail('sbron\u200Bson@maryville.edu')).toBe('sbronson@maryville.edu');
 	});
 	it('returns empty for non-strings, blanks and non-emails', () => {
 		expect(normalizeEmail(undefined)).toBe('');
