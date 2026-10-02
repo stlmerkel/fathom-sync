@@ -1798,15 +1798,17 @@ export class ReviewModal extends Modal {
 			buttons.addButton(b => b.setButtonText('Create selected').setCta().onClick(() => submit(false)));
 			// Ignoring is permanent and can cover hundreds of people on a first backfill,
 			// so it takes a second click that states the count.
+			// onClick() adds a listener rather than replacing one, so confirm with a flag.
+			let confirming = false;
 			buttons.addButton(b =>
 				b
 					.setButtonText('Create selected, ignore the rest')
 					.setWarning()
 					.onClick(async () => {
 						const rest = externals.length - this.checked.size;
-						if (rest > 0) {
+						if (rest > 0 && !confirming) {
+							confirming = true;
 							b.setButtonText(`Click again to ignore ${rest} ${rest === 1 ? 'person' : 'people'}`);
-							b.onClick(() => submit(true));
 							return;
 						}
 						await submit(true);
