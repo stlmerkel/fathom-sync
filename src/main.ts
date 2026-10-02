@@ -471,6 +471,11 @@ export default class FathomSyncPlugin extends Plugin {
 
 		// ── Frontmatter ──
 		lines.push('---');
+		// Ecosystem routing fields (FRONTMATTER-SPEC: vault, type, status, tags are required).
+		// vault is the vault the plugin runs in, so the note never reads as misplaced to /housekeep.
+		lines.push(`vault: ${this.app.vault.getName()}`);
+		lines.push('type: meeting');
+		lines.push('status: complete');
 		lines.push(`title: "${this.escapeYaml(meeting.title || meeting.meeting_title)}"`);
 		lines.push(`recording_id: ${meeting.recording_id}`);
 		lines.push(`date: ${moment(meeting.created_at).format('YYYY-MM-DD')}`);
