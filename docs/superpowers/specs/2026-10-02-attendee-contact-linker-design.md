@@ -92,7 +92,8 @@ Opens at the end of a sync or a real backfill run, and only if the queue is non-
 - Two groups: **Name collisions** (shown first) and **Externals**.
   - **Name collisions are read-only.** Each shows the person, their email, and the path of the existing file that has their name. They can't be created (the filename is taken) and are never ignored, so they reappear each run until resolved by hand, for example by adding the email to the existing record or renaming it.
   - **Externals** each get a checkbox, unchecked by default, showing name, email, domain, matched org, and the number of meetings.
-- **Create selected:** creates the checked externals, links them into all their meetings, adds every unchecked external's email to `ignoredEmails`, saves settings, and shows the summary.
+- **Create selected:** creates the checked externals, links them into all their meetings, ignores nobody, saves settings, and shows the summary.
+- **Create selected, ignore the rest:** does the same and also adds every unchecked external's email to `ignoredEmails`; the button asks for a second click (stating the count) before it acts.
 - **Close without choosing:** nothing is created and nothing is ignored. The same people are offered next run.
 
 ## Preview and log
