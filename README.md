@@ -77,8 +77,28 @@ Open the Command Palette (`Cmd/Ctrl+P`) and search for:
 | **Fathom Sync: Sync all meetings** | Fetches every meeting from your account |
 | **Fathom Sync: Sync recent meetings (last 7 days)** | Fetches meetings created in the last 7 days |
 | **Fathom Sync: Sync recent meetings (last 30 days)** | Fetches meetings created in the last 30 days |
+| **Fathom Sync: Preview attendee linking for all meeting notes** | Writes `90-SYSTEM/fathom-sync/attendee-link-preview.md`; changes nothing else |
+| **Fathom Sync: Link attendees in all meeting notes** | Backfills every existing meeting note |
 
 There is also a **ribbon icon** (video camera) in the left sidebar for one-click full sync.
+
+### Attendee linking
+
+After each sync, fathom-sync links meeting attendees to Contact records by email, adding one `Related: [[Name]]` line per person under the note's frontmatter.
+
+- **Existing contact** with that email → linked.
+- **In the faculty-staff directory CSV** → a contact is created from the directory row, then linked.
+- **Anyone else** → listed in a review modal at the end of the run. Checked people become contacts. **Create selected** leaves the rest to be asked about again; **Create selected, ignore the rest** (confirmed with a second click) adds them to the ignore list.
+- **Name collision** (a contact file with that name already exists under another email) → listed in the modal, never created; resolve by hand.
+
+Commands:
+
+| Command | Description |
+|---------|-------------|
+| **Fathom Sync: Preview attendee linking for all meeting notes** | Writes `90-SYSTEM/fathom-sync/attendee-link-preview.md`; changes nothing else |
+| **Fathom Sync: Link attendees in all meeting notes** | Backfills every existing meeting note |
+
+Every real run appends what it changed to `90-SYSTEM/fathom-sync/attendee-link-log.md`. All writes only insert lines, so a run can be reversed from the log. Set **Your emails** in settings first; the backfill commands refuse to run without it.
 
 ### Generated note structure
 
