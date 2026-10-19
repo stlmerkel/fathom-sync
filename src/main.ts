@@ -1,4 +1,4 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFolder, moment, requestUrl } from 'obsidian';
+import { App, Notice, Plugin, PluginSettingTab, TFolder, moment, requestUrl, type SettingDefinitionItem } from 'obsidian';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -564,6 +564,9 @@ export default class FathomSyncPlugin extends Plugin {
 
 // ─── Settings Tab ───────────────────────────────────────────────────────────
 
+// Settings stored as vault paths: no leading or trailing slash.
+const PATH_KEYS = ['meetingFolder'];
+
 class FathomSyncSettingTab extends PluginSettingTab {
 	plugin: FathomSyncPlugin;
 
@@ -572,98 +575,71 @@ class FathomSyncSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (PATH_KEYS.includes(key)) value = String(value).trim().replace(/^\/|\/$/g, '');
+		await super.setControlValue(key, value);
+	}
 
-		containerEl.createEl('h2', { text: 'Fathom Sync Settings' });
-
-		new Setting(containerEl)
-			.setName('API Key')
-			.setDesc('Your Fathom API key (found in Fathom → Settings → Integrations).')
-			.addText((text) =>
-				text
-					.setPlaceholder('Enter your Fathom API key')
-					.setValue(this.plugin.settings.apiKey)
-					.then((t) => { t.inputEl.type = 'password'; })
-					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Meeting folder')
-			.setDesc('Vault folder where meeting notes will be created.')
-			.addText((text) =>
-				text
-					.setPlaceholder('Meetings/Fathom')
-					.setValue(this.plugin.settings.meetingFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.meetingFolder = value.replace(/^\/|\/$/g, '');
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('File name format')
-			.setDesc('Template for the note file name. Available: {{date}}, {{time}}, {{title}}.')
-			.addText((text) =>
-				text
-					.setPlaceholder('{{date}} — {{title}}')
-					.setValue(this.plugin.settings.fileNameFormat)
-					.onChange(async (value) => {
-						this.plugin.settings.fileNameFormat = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Include summary')
-			.setDesc('Fetch and embed the AI-generated meeting summary.')
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.includeSummary)
-					.onChange(async (value) => {
-						this.plugin.settings.includeSummary = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Include transcript')
-			.setDesc('Fetch and embed the full meeting transcript.')
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.includeTranscript)
-					.onChange(async (value) => {
-						this.plugin.settings.includeTranscript = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Include action items')
-			.setDesc('Embed action items as a checklist.')
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.includeActionItems)
-					.onChange(async (value) => {
-						this.plugin.settings.includeActionItems = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName('Sync on startup')
-			.setDesc('Automatically sync the last 7 days of meetings when Obsidian starts.')
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.syncOnStartup)
-					.onChange(async (value) => {
-						this.plugin.settings.syncOnStartup = value;
-						await this.plugin.saveSettings();
-					})
-			);
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				name: 'API key',
+				desc: 'Your Fathom API key (found in Fathom → Settings → Integrations).',
+				aliases: ['token', 'Fathom key'],
+				render: (setting) => {
+					setting.addText((text) =>
+						text
+							.setPlaceholder('Enter your Fathom API key')
+							.setValue(this.plugin.settings.apiKey)
+							.then((t) => { t.inputEl.type = 'password'; })
+							.onChange(async (value) => {
+								this.plugin.settings.apiKey = value;
+								await this.plugin.saveSettings();
+							})
+					);
+				},
+			},
+			{
+				name: 'Meeting folder',
+				desc: 'Vault folder where meeting notes will be created.',
+				control: { type: 'folder', key: 'meetingFolder', placeholder: 'Meetings/Fathom' },
+			},
+			{
+				name: 'File name format',
+				desc: 'Template for the note file name. Available: {{date}}, {{time}}, {{title}}.',
+				control: {
+					type: 'text',
+					key: 'fileNameFormat',
+					placeholder: '{{date}} — {{title}}',
+					validate: (v) => (v.trim() ? undefined : 'A file name format is required.'),
+				},
+			},
+			{
+				type: 'group',
+				heading: 'Note contents',
+				items: [
+					{
+						name: 'Include summary',
+						desc: 'Fetch and embed the AI-generated meeting summary.',
+						control: { type: 'toggle', key: 'includeSummary' },
+					},
+					{
+						name: 'Include transcript',
+						desc: 'Fetch and embed the full meeting transcript.',
+						control: { type: 'toggle', key: 'includeTranscript' },
+					},
+					{
+						name: 'Include action items',
+						desc: 'Embed action items as a checklist.',
+						control: { type: 'toggle', key: 'includeActionItems' },
+					},
+				],
+			},
+			{
+				name: 'Sync on startup',
+				desc: 'Automatically sync the last 7 days of meetings when Obsidian starts.',
+				control: { type: 'toggle', key: 'syncOnStartup' },
+			},
+		];
 	}
 }
