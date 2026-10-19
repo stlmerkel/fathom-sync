@@ -362,9 +362,10 @@ export default class FathomSyncPlugin extends Plugin {
 			: '(first sync)';
 		new Notice(`Fathom Sync: Checking for new meetings ${label}...`);
 
+		const notes: MeetingInput[] = [];
 		try {
 			const meetings = await this.fetchAllMeetings(since ?? undefined);
-			const { created, skipped, notes } = await this.processMeetings(meetings);
+			const { created, skipped } = await this.processMeetings(meetings, notes);
 
 			// Update lastSyncedAt to the most recent meeting's created_at
 			if (meetings.length > 0) {
@@ -379,9 +380,11 @@ export default class FathomSyncPlugin extends Plugin {
 			const parts = [`${created} new`];
 			if (skipped > 0) parts.push(`${skipped} still processing`);
 			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
-			await this.linkSyncedNotes(notes);
 		} catch (e) {
 			new Notice(`Fathom Sync: Error — ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			// Notes created before an error still need linking; later syncs would skip them as existing.
+			await this.linkSyncedNotes(notes);
 		}
 	}
 
@@ -391,9 +394,10 @@ export default class FathomSyncPlugin extends Plugin {
 			return;
 		}
 		new Notice('Fathom Sync: Full re-sync — fetching all meetings...');
+		const notes: MeetingInput[] = [];
 		try {
 			const meetings = await this.fetchAllMeetings();
-			const { created, skipped, notes } = await this.processMeetings(meetings);
+			const { created, skipped } = await this.processMeetings(meetings, notes);
 
 			if (meetings.length > 0) {
 				const latest = meetings
@@ -407,9 +411,11 @@ export default class FathomSyncPlugin extends Plugin {
 			const parts = [`${created} new`];
 			if (skipped > 0) parts.push(`${skipped} still processing`);
 			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
-			await this.linkSyncedNotes(notes);
 		} catch (e) {
 			new Notice(`Fathom Sync: Error — ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			// Notes created before an error still need linking; later syncs would skip them as existing.
+			await this.linkSyncedNotes(notes);
 		}
 	}
 
@@ -465,13 +471,12 @@ export default class FathomSyncPlugin extends Plugin {
 		}).open();
 	}
 
-	private async processMeetings(meetings: FathomMeeting[]): Promise<{ created: number; existed: number; skipped: number; notes: MeetingInput[] }> {
+	private async processMeetings(meetings: FathomMeeting[], notes: MeetingInput[]): Promise<{ created: number; existed: number; skipped: number }> {
 		await this.ensureFolder(this.settings.meetingFolder);
 
 		let created = 0;
 		let existed = 0;
 		let skipped = 0;
-		const notes: MeetingInput[] = [];
 
 		for (let idx = 0; idx < meetings.length; idx++) {
 			const meeting = meetings[idx]!;
@@ -497,7 +502,7 @@ export default class FathomSyncPlugin extends Plugin {
 			}
 		}
 
-		return { created, existed, skipped, notes };
+		return { created, existed, skipped };
 	}
 
 	private async ensureFolder(path: string) {
