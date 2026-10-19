@@ -23,7 +23,7 @@
 - `tsconfig.json` targets ES6 with lib up to ES2017: no `replaceAll`, `Object.fromEntries`, `Array.prototype.flat`, or optional catch binding helpers beyond what TS downlevels.
 - Pure modules (`normalize`, `directory`, `related`, `contactTemplate`, `planner`, `report`) must not import `obsidian`; Vitest cannot resolve it.
 - Write invisible characters (BOM, NBSP, zero-width, U+2028/U+2029) as `\uXXXX` escapes in source and tests, never as literal characters. Literals get silently dropped when code is copied, which leaves tests passing vacuously, and a literal U+2028/U+2029 inside a regex literal is a syntax error.
-- `vault.process` needs Obsidian 1.1.0, so `manifest.json` `minAppVersion` becomes `1.1.0`.
+- The settings tab is declarative (`getSettingDefinitions()`), which needs Obsidian 1.13.0, so `manifest.json` `minAppVersion` becomes `1.13.0` in Task 8. That also covers `vault.process` (1.1.0). The installed app is 1.14.4. No `display()` fallback: this is a personal plugin with one install.
 
 ## Review Focus
 
@@ -39,8 +39,8 @@
 
 | File | Status | Responsibility |
 |------|--------|----------------|
-| `package.json` | Modify | Add `vitest` dev dependency and `test` script; bump version |
-| `manifest.json` | Modify | Bump version to 1.5.0 and `minAppVersion` to 1.1.0 |
+| `package.json` | Modify | Add `vitest` dev dependency and `test` script; raise `obsidian` typings to ≥1.13; bump version |
+| `manifest.json` | Modify | Bump version to 1.5.0 and `minAppVersion` to 1.13.0 |
 | `src/attendees/normalize.ts` | Create | Email and domain normalisation |
 | `src/attendees/directory.ts` | Create | CSV parsing → `Map<email, DirectoryPerson>` |
 | `src/attendees/related.ts` | Create | Insert `Related:` lines into note text |
@@ -49,7 +49,7 @@
 | `src/attendees/report.ts` | Create | Render preview, log section, summary line |
 | `src/attendees/linker.ts` | Create | Obsidian adapter: index, directory load, note reading, run/approve |
 | `src/attendees/ReviewModal.ts` | Create | The externals review modal |
-| `src/main.ts` | Modify | Settings, sync hook, two commands, settings tab section |
+| `src/main.ts` | Modify | Declarative settings tab (Task 8); settings, sync hook, two commands, Attendee linking settings page (Task 9) |
 | `tests/*.test.ts` | Create | Unit tests for the six pure modules |
 | `README.md` | Modify | Document the feature |
 
@@ -1456,7 +1456,7 @@ git commit -m "feat(attendees): render preview, log section and summary"
 
 ### Task 7: `linker.ts` and `ReviewModal.ts`, the Obsidian layer
 
-This task has no unit tests: everything here calls the Obsidian API, which Vitest can't load. Its correctness gate is `npm run build` (type check plus bundle) now, and the manual acceptance run in Task 9.
+This task has no unit tests: everything here calls the Obsidian API, which Vitest can't load. Its correctness gate is `npm run build` (type check plus bundle) now, and the manual acceptance run in Task 10.
 
 **Files:**
 - Create: `src/attendees/linker.ts`
@@ -1843,10 +1843,149 @@ git commit -m "feat(attendees): Obsidian linker, preview/log writer and review m
 
 ---
 
-### Task 8: Wire it into `main.ts`
+### Task 8: Move the settings tab to declarative settings
+
+Replaces `FathomSyncSettingTab.display()` with `getSettingDefinitions()` (Obsidian 1.13.0) for the seven settings that exist today, so Task 9 adds the attendee settings as definitions instead of writing them imperatively and migrating later. Obsidian then renders and saves the controls, and indexes them for global settings search. No behaviour change beyond that: same keys, same defaults, same `data.json`.
+
+Reference: https://docs.obsidian.md/plugins/guides/migrate-declarative-settings, and the `SettingDefinition*` / `Setting*Control` types in `node_modules/obsidian/obsidian.d.ts`.
 
 **Files:**
-- Modify: `src/main.ts` (imports at line 1; `FathomSyncSettings` and `DEFAULT_SETTINGS` around lines 88–108; `onload` around 120; `loadSettings`; `syncNewMeetings`, `syncAllMeetings`, `processMeetings`, `createOrUpdateMeetingNote`; `FathomSyncSettingTab.display`)
+- Modify: `package.json`, `package-lock.json` (`obsidian` typings ≥1.13; the installed 1.12.3 lacks `getSettingDefinitions`)
+- Modify: `manifest.json` (`minAppVersion` → `1.13.0`)
+- Modify: `src/main.ts` (import line 1; `FathomSyncSettingTab`, lines 565–669)
+
+API notes the code below relies on (checked against the 1.14.4 typings):
+- `PluginSettingTab` reads and writes `this.plugin.settings[key]` through `getControlValue` / `setControlValue`, and persists after each `control` change. Override `setControlValue` to normalise a value, then call `super`.
+- When `getSettingDefinitions()` returns a non-empty array, `display()` is never called. It is deprecated, so delete it rather than keeping it as a fallback.
+- `folder` gives a text input with a vault folder suggester, and `file` the same for files, with an optional `filter`. `validate` returns an error string to reject a change and show it inline. It never changes the stored value.
+- `render` rows don't save automatically, so the callback saves itself. The masked API key uses one: the `secret` control (1.13.2) stores a reference into `app.secretStorage`, not the key, which would need a migration of the existing plaintext key. Out of scope here.
+- `update()` rebuilds the definitions when their structure changes (list items added or removed). `refreshDomState()` only re-evaluates `visible` / `disabled`.
+
+- [ ] **Step 1: Raise the typings and the minimum app version**
+
+```bash
+npm install -D obsidian@latest
+```
+
+Expected: `package.json` shows `"obsidian": "^1.14.4"` (or newer), and `grep -c getSettingDefinitions node_modules/obsidian/obsidian.d.ts` prints a non-zero count. In `manifest.json`, set `"minAppVersion": "1.13.0"`.
+
+- [ ] **Step 2: Replace the settings tab**
+
+In the `obsidian` import on line 1, add `type SettingDefinitionItem` and remove `Setting`, which nothing else in `main.ts` uses. Replace the whole `FathomSyncSettingTab` class with:
+
+```ts
+// Settings stored as vault paths: no leading or trailing slash.
+const PATH_KEYS = ['meetingFolder'];
+
+class FathomSyncSettingTab extends PluginSettingTab {
+	plugin: FathomSyncPlugin;
+
+	constructor(app: App, plugin: FathomSyncPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (PATH_KEYS.includes(key)) value = String(value).trim().replace(/^\/|\/$/g, '');
+		await super.setControlValue(key, value);
+	}
+
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [
+			{
+				name: 'API key',
+				desc: 'Your Fathom API key (found in Fathom → Settings → Integrations).',
+				aliases: ['token', 'Fathom key'],
+				render: (setting) => {
+					setting.addText((text) =>
+						text
+							.setPlaceholder('Enter your Fathom API key')
+							.setValue(this.plugin.settings.apiKey)
+							.then((t) => { t.inputEl.type = 'password'; })
+							.onChange(async (value) => {
+								this.plugin.settings.apiKey = value;
+								await this.plugin.saveSettings();
+							})
+					);
+				},
+			},
+			{
+				name: 'Meeting folder',
+				desc: 'Vault folder where meeting notes will be created.',
+				control: { type: 'folder', key: 'meetingFolder', placeholder: 'Meetings/Fathom' },
+			},
+			{
+				name: 'File name format',
+				desc: 'Template for the note file name. Available: {{date}}, {{time}}, {{title}}.',
+				control: {
+					type: 'text',
+					key: 'fileNameFormat',
+					placeholder: '{{date}} — {{title}}',
+					validate: (v) => (v.trim() ? undefined : 'A file name format is required.'),
+				},
+			},
+			{
+				type: 'group',
+				heading: 'Note contents',
+				items: [
+					{
+						name: 'Include summary',
+						desc: 'Fetch and embed the AI-generated meeting summary.',
+						control: { type: 'toggle', key: 'includeSummary' },
+					},
+					{
+						name: 'Include transcript',
+						desc: 'Fetch and embed the full meeting transcript.',
+						control: { type: 'toggle', key: 'includeTranscript' },
+					},
+					{
+						name: 'Include action items',
+						desc: 'Embed action items as a checklist.',
+						control: { type: 'toggle', key: 'includeActionItems' },
+					},
+				],
+			},
+			{
+				name: 'Sync on startup',
+				desc: 'Automatically sync the last 7 days of meetings when Obsidian starts.',
+				control: { type: 'toggle', key: 'syncOnStartup' },
+			},
+		];
+	}
+}
+```
+
+The `<h2>Fathom Sync Settings</h2>` heading goes: Obsidian's plugin guidelines advise against a top-level heading in a settings tab, and the declarative tab has no place for one.
+
+- [ ] **Step 3: Build**
+
+Run: `npm run build && npm test`
+Expected: build exits 0, all tests PASS. If `tsc` rejects an object literal, check its shape against `SettingDefinitionItem` in the typings rather than adding a cast.
+
+- [ ] **Step 4: Walk the tab in Obsidian**
+
+Copy `main.js` and `manifest.json` into the vault plugin folder as in Task 10 Step 4 (back up `main.js` first), reload the plugin, then check:
+
+- Every control shows the current value from `data.json`. The API key shows masked, and its name appears once (if the `render` row also shows a second label, set the name inside the callback and drop the definition's `desc`).
+- Changing each control survives a plugin reload. Typing `/Meetings/Fathom/` into Meeting folder stores `Meetings/Fathom`.
+- Clearing File name format shows the inline error and leaves the stored value unchanged.
+- Global settings search finds "transcript" and "token".
+
+Then restore the backed-up `main.js`, or leave this build installed; Task 10 overwrites it either way.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add package.json package-lock.json manifest.json src/main.ts main.js
+git commit -m "refactor(settings): declarative settings tab (Obsidian 1.13)"
+```
+
+---
+
+### Task 9: Wire it into `main.ts`
+
+**Files:**
+- Modify: `src/main.ts` (imports at line 1; `FathomSyncSettings` and `DEFAULT_SETTINGS` around lines 88–108; `onload` around 120; `loadSettings`; `syncNewMeetings`, `syncAllMeetings`, `processMeetings`, `createOrUpdateMeetingNote`; `FathomSyncSettingTab` from Task 8)
 
 **Interfaces:**
 - Consumes: `AttendeeLinker`, `readMeetingNotes`, `LinkerSettings`, `RunResult` (Task 7); `ReviewModal` (Task 7); `MeetingInput` (Task 5); `summaryLine`, `RunRecord` (Task 6)
@@ -2079,58 +2218,103 @@ private reportAndReview(result: RunResult) {
 }
 ```
 
-- [ ] **Step 6: Add the settings tab section**
+- [ ] **Step 6: Add the Attendee linking settings page**
 
-At the end of `FathomSyncSettingTab.display()`, after the "Sync on startup" setting:
+In `FathomSyncSettingTab` (from Task 8), extend the path keys:
 
 ```ts
-containerEl.createEl('h3', { text: 'Attendee linking' });
-
-new Setting(containerEl)
-	.setName('Link attendees on sync')
-	.setDesc('After each sync, add Related: [[Name]] lines for attendees with a Contact record.')
-	.addToggle(t =>
-		t.setValue(this.plugin.settings.linkOnSync).onChange(async v => {
-			this.plugin.settings.linkOnSync = v;
-			await this.plugin.saveSettings();
-		}),
-	);
-
-const textSetting = (name: string, desc: string, key: 'contactsFolder' | 'directoryCsvPath' | 'directoryOrg' | 'reportFolder') =>
-	new Setting(containerEl)
-		.setName(name)
-		.setDesc(desc)
-		.addText(t =>
-			t.setValue(this.plugin.settings[key]).onChange(async v => {
-				this.plugin.settings[key] = key === 'directoryOrg' ? v.trim() : v.trim().replace(/^\/|\/$/g, '');
-				await this.plugin.saveSettings();
-			}),
-		);
-
-textSetting('Contacts folder', 'Folder holding person and organization records.', 'contactsFolder');
-textSetting('Directory CSV path', 'Faculty-staff directory export used to create Maryville contacts.', 'directoryCsvPath');
-textSetting('Directory organization', 'Organization written on contacts created from the directory.', 'directoryOrg');
-textSetting('Report folder', 'Where the preview and the run log are written.', 'reportFolder');
-
-const listSetting = (name: string, desc: string, key: 'selfEmails' | 'ignoredEmails') =>
-	new Setting(containerEl)
-		.setName(name)
-		.setDesc(desc)
-		.addTextArea(t =>
-			t.setValue(this.plugin.settings[key].join('\n')).onChange(async v => {
-				this.plugin.settings[key] = v.split('\n').map(s => s.trim()).filter(Boolean);
-				await this.plugin.saveSettings();
-			}),
-		);
-
-listSetting('Your emails', 'One per line. Never linked. Required before Preview or Link attendees will run.', 'selfEmails');
-listSetting('Ignored emails', 'One per line. Filled in by the review modal; delete a line to be asked about that person again.', 'ignoredEmails');
+const PATH_KEYS = ['meetingFolder', 'contactsFolder', 'directoryCsvPath', 'reportFolder'];
 ```
+
+`selfEmails` is a `string[]` edited in a textarea, one per line. Map it in the control-value hooks, and trim the organization name. Replace `setControlValue` and add `getControlValue`:
+
+```ts
+getControlValue(key: string): unknown {
+	if (key === 'selfEmails') return this.plugin.settings.selfEmails.join('\n');
+	return super.getControlValue(key);
+}
+
+async setControlValue(key: string, value: unknown): Promise<void> {
+	if (PATH_KEYS.includes(key)) value = String(value).trim().replace(/^\/|\/$/g, '');
+	if (key === 'directoryOrg') value = String(value).trim();
+	if (key === 'selfEmails') value = String(value).split('\n').map((s) => s.trim()).filter(Boolean);
+	await super.setControlValue(key, value);
+}
+```
+
+Append this page as the last element of the array returned by `getSettingDefinitions()`:
+
+```ts
+{
+	type: 'page',
+	name: 'Attendee linking',
+	desc: 'Link meeting attendees to Contact records by email.',
+	// Preview and backfill refuse to run until Your emails is set.
+	status: () => (this.plugin.settings.selfEmails.length ? null : 'warning'),
+	items: [
+		{
+			name: 'Link attendees on sync',
+			desc: 'After each sync, add Related: [[Name]] lines for attendees with a Contact record.',
+			control: { type: 'toggle', key: 'linkOnSync' },
+		},
+		{
+			name: 'Your emails',
+			desc: 'One per line. Never linked. Required before Preview or Link attendees will run.',
+			aliases: ['self emails', 'my email'],
+			control: {
+				type: 'textarea',
+				key: 'selfEmails',
+				rows: 3,
+				validate: (v) => {
+					const bad = v.split('\n').map((s) => s.trim()).filter((s) => s && !s.includes('@'));
+					return bad.length ? `Not an email: ${bad.join(', ')}` : undefined;
+				},
+			},
+		},
+		{
+			name: 'Contacts folder',
+			desc: 'Folder holding person and organization records.',
+			control: { type: 'folder', key: 'contactsFolder' },
+		},
+		{
+			name: 'Directory CSV path',
+			desc: 'Faculty-staff directory export used to create Maryville contacts.',
+			aliases: ['faculty staff directory'],
+			control: { type: 'file', key: 'directoryCsvPath', filter: (f) => f.extension === 'csv' },
+		},
+		{
+			name: 'Directory organization',
+			desc: 'Organization written on contacts created from the directory.',
+			control: { type: 'text', key: 'directoryOrg' },
+		},
+		{
+			name: 'Report folder',
+			desc: 'Where the preview and the run log are written.',
+			control: { type: 'folder', key: 'reportFolder' },
+		},
+		{
+			type: 'list',
+			heading: 'Ignored emails',
+			emptyState: 'Nobody ignored. The review modal adds people here; delete one to be asked about them again.',
+			items: this.plugin.settings.ignoredEmails.map((email) => ({ name: email })),
+			onDelete: async (index) => {
+				this.plugin.settings.ignoredEmails.splice(index, 1);
+				await this.plugin.saveSettings();
+				this.update();
+			},
+		},
+	],
+},
+```
+
+Two details. The page `status` reads settings when the tab renders, so after setting Your emails it may only clear on the next `update()` (reopening the tab). That's acceptable; don't add a refresh hook unless Step 7's walk shows it's confusing. The Ignored emails list is display-and-delete only: entries are added by the review modal (Step 5), so the list has no `addItem`.
 
 - [ ] **Step 7: Build and test**
 
 Run: `npm run build && npm test`
 Expected: build exits 0, all tests PASS.
+
+Then install the build as in Task 8 Step 4 and walk the **Attendee linking** page. It shows a warning status while Your emails is empty. `bmerkel` (no `@`) shows the inline error. The folder and CSV inputs suggest vault paths, and the CSV input suggests only `.csv` files. Add an address to `ignoredEmails` in `data.json` by hand, reload, delete it from the list, and confirm it's gone from `data.json`. Global settings search finds "Your emails" and "Ignored emails" and opens the sub-page.
 
 - [ ] **Step 8: Commit**
 
@@ -2141,15 +2325,15 @@ git commit -m "feat: link attendees after sync and add backfill commands"
 
 ---
 
-### Task 9: Release, install and acceptance on the real vault
+### Task 10: Release, install and acceptance on the real vault
 
 **Files:**
-- Modify: `manifest.json` (version → 1.5.0, `minAppVersion` → 1.1.0), `package.json` (version → 1.5.0)
+- Modify: `manifest.json` (version → 1.5.0; `minAppVersion` is already 1.13.0 from Task 8), `package.json` (version → 1.5.0)
 - Modify: `README.md`
 
 - [ ] **Step 1: Bump the version and rebuild**
 
-Set `"version": "1.5.0"` in both `manifest.json` and `package.json`, and `"minAppVersion": "1.1.0"` in `manifest.json` (`vault.process` arrived in 1.1.0). Then run:
+Set `"version": "1.5.0"` in both `manifest.json` and `package.json`. Leave `minAppVersion` at the `1.13.0` set in Task 8, which also covers `vault.process` (1.1.0). Then run:
 
 ```bash
 npm run build
@@ -2200,7 +2384,7 @@ Then in Obsidian: **Settings → Community plugins**, toggle Fathom Sync off and
 
 - [ ] **Step 5: Configure**
 
-Settings → Fathom Sync → Attendee linking: set **Your emails** to `bmerkel@maryville.edu`. Confirm the folder and CSV defaults match the vault.
+Settings → Fathom Sync → **Attendee linking** (sub-page, marked with a warning until this is done): set **Your emails** to `bmerkel@maryville.edu`. Confirm the folder and CSV defaults match the vault.
 
 - [ ] **Step 6: Preview (human gate)**
 
@@ -2243,7 +2427,7 @@ Grepped `mnemosyne/50-DEVELOPMENT/_shared/lessons-learned.md` for this plan's me
 | Entry | Disposition |
 |---|---|
 | L31 (NBSP, zero-width, BOM, emails normalised on both paths, typed DTO at CSV edges) | Applied: Task 1's `normalizeEmail` strips invisible characters that `trim()` leaves, and is used on every compare path (contact index, directory, attendees, self and ignore lists). Task 2 maps rows into a typed `DirectoryPerson` once. |
-| L35 (idempotency keys on the artifact the operation produces) | Applied: Task 3 keys "already done" on the `Related: [[Name]]` line itself, not on "this note was processed", so a partial run is completed by the next run. Task 9 Step 8 verifies a second run is a no-op. |
+| L35 (idempotency keys on the artifact the operation produces) | Applied: Task 3 keys "already done" on the `Related: [[Name]]` line itself, not on "this note was processed", so a partial run is completed by the next run. Task 10 Step 8 verifies a second run is a no-op. |
 | L2 (assert parsed effects, not declarations) | Applied: Tasks 2 and 6 assert parsed CSV values and rendered text, not configuration. |
 | L30 (backfill before type conversion) | N/A: database migrations; this backfill only inserts lines into notes. |
 
