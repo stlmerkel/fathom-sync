@@ -90,7 +90,7 @@ export function renderContact(c: NewContact): string {
 		'| Organization | Role | Start | End | Status |',
 		'|---|---|---|---|---|',
 	);
-	if (orgRef) lines.push(`| ${orgRef} | ${c.title} | | | active |`);
+	if (orgRef) lines.push(`| ${orgRef} | ${c.title} | | | ${c.status} |`);
 	lines.push(
 		'',
 		'___',

@@ -84,6 +84,12 @@ describe('renderContact', () => {
 		expect(o).toContain('\nSome Vendor\n');
 	});
 
+	it('uses the contact status in the frontmatter and the affiliation row', () => {
+		const o = renderContact({ ...BASE, status: 'inactive' });
+		expect(o).toContain('status: inactive');
+		expect(o).toContain('| [[Maryville University]] | Senior Associate: CTL | | | inactive |');
+	});
+
 	it('omits the org line and affiliation row when there is no organization', () => {
 		const o = renderContact({ ...BASE, organization: '', orgHasRecord: false });
 		expect(o).not.toContain('| active |');
