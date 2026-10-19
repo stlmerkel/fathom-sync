@@ -37,6 +37,7 @@ export class ReviewModal extends Modal {
 
 		const IGNORE_LABEL = 'Create selected, ignore the rest';
 		let confirming = false;
+		let confirmingSince = 0;
 		let ignoreBtn: ButtonComponent | undefined;
 
 		if (externals.length) {
@@ -80,8 +81,11 @@ export class ReviewModal extends Modal {
 					.setWarning()
 					.onClick(async () => {
 						const rest = externals.length - this.checked.size;
+						// Two fast clicks must not pass the confirmation: ignore a second click inside 400 ms.
+						if (rest > 0 && confirming && Date.now() - confirmingSince < 400) return;
 						if (rest > 0 && !confirming) {
 							confirming = true;
+							confirmingSince = Date.now();
 							b.setButtonText(`Click again to ignore ${rest} ${rest === 1 ? 'person' : 'people'}`);
 							return;
 						}
