@@ -14,6 +14,10 @@ This plugin was 100% vibe coded. This is only intended for my personal use and I
 - **Configurable** — choose your folder, file naming template, and which sections to include
 - **Optional auto-sync** — sync the last 7 days of meetings automatically on startup
 
+## Requirements
+
+Obsidian 1.13 or later.
+
 ## Installation
 
 ### From source
@@ -50,13 +54,20 @@ Use the [Hot-Reload plugin](https://github.com/pjeby/hot-reload) in your dev vau
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **API Key** | — | Your Fathom API key (stored as a password field) |
+| **API key** | — | Your Fathom API key (stored as a password field) |
 | **Meeting folder** | `Meetings/Fathom` | Vault path where meeting notes are created |
 | **File name format** | `{{date}} — {{title}}` | Template for note filenames (see [placeholders](#file-name-placeholders)) |
 | **Include summary** | On | Fetch and embed the AI-generated summary |
 | **Include transcript** | On | Fetch and embed the full speaker-attributed transcript |
 | **Include action items** | On | Embed action items as an Obsidian checklist |
 | **Sync on startup** | Off | Automatically sync the last 7 days when Obsidian starts |
+| **Link attendees on sync** | On | After each sync, link meeting attendees to Contact records |
+| **Your emails** | — | One per line. Never linked. Required before attendee preview or backfill will run |
+| **Contacts folder** | `30-REFERENCE/Contacts` | Folder holding person and organization records |
+| **Directory CSV path** | `70-PROJECTS/Maryville Institutional AI/faculty-staff/faculty-staff.csv` | Faculty-staff directory export used to create contacts |
+| **Directory organization** | `Maryville University` | Organization written on contacts created from the directory |
+| **Report folder** | `90-SYSTEM/fathom-sync` | Where the preview and the run log are written |
+| **Ignored emails** | — | People the review modal told the linker to skip; delete one to be asked again |
 
 ### File name placeholders
 
@@ -74,13 +85,12 @@ Open the Command Palette (`Cmd/Ctrl+P`) and search for:
 
 | Command | Description |
 |---------|-------------|
-| **Fathom Sync: Sync all meetings** | Fetches every meeting from your account |
-| **Fathom Sync: Sync recent meetings (last 7 days)** | Fetches meetings created in the last 7 days |
-| **Fathom Sync: Sync recent meetings (last 30 days)** | Fetches meetings created in the last 30 days |
+| **Fathom Sync: Sync new meetings** | Fetches meetings created since the last sync |
+| **Fathom Sync: Sync all meetings (full re-sync)** | Fetches every meeting from your account; existing notes are left alone |
 | **Fathom Sync: Preview attendee linking for all meeting notes** | Writes `90-SYSTEM/fathom-sync/attendee-link-preview.md`; changes nothing else |
 | **Fathom Sync: Link attendees in all meeting notes** | Backfills every existing meeting note |
 
-There is also a **ribbon icon** (video camera) in the left sidebar for one-click full sync.
+There is also a **ribbon icon** (video camera) in the left sidebar for one-click sync of new meetings.
 
 ### Attendee linking
 
