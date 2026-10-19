@@ -1,4 +1,8 @@
 import { App, Notice, Plugin, PluginSettingTab, TFolder, moment, requestUrl, type SettingDefinitionItem } from 'obsidian';
+import { AttendeeLinker, readMeetingNotes, type RunResult } from './attendees/linker';
+import type { MeetingInput } from './attendees/planner';
+import { summaryLine } from './attendees/report';
+import { ReviewModal } from './attendees/ReviewModal';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +96,13 @@ interface FathomSyncSettings {
 	fileNameFormat: string;
 	syncOnStartup: boolean;
 	lastSyncedAt: string | null;
+	linkOnSync: boolean;
+	contactsFolder: string;
+	directoryCsvPath: string;
+	directoryOrg: string;
+	selfEmails: string[];
+	ignoredEmails: string[];
+	reportFolder: string;
 }
 
 const DEFAULT_SETTINGS: FathomSyncSettings = {
@@ -103,6 +114,13 @@ const DEFAULT_SETTINGS: FathomSyncSettings = {
 	fileNameFormat: '{{date}} — {{title}}',
 	syncOnStartup: false,
 	lastSyncedAt: null,
+	linkOnSync: true,
+	contactsFolder: '30-REFERENCE/Contacts',
+	directoryCsvPath: '70-PROJECTS/Maryville Institutional AI/faculty-staff/faculty-staff.csv',
+	directoryOrg: 'Maryville University',
+	selfEmails: [],
+	ignoredEmails: [],
+	reportFolder: '90-SYSTEM/fathom-sync',
 };
 
 const BASE_URL = 'https://api.fathom.ai/external/v1';
@@ -118,9 +136,11 @@ class FathomLockedError extends Error {
 
 export default class FathomSyncPlugin extends Plugin {
 	settings: FathomSyncSettings;
+	linker: AttendeeLinker;
 
 	async onload() {
 		await this.loadSettings();
+		this.linker = new AttendeeLinker(this.app, () => this.settings);
 		this.addSettingTab(new FathomSyncSettingTab(this.app, this));
 
 		this.addRibbonIcon('video', 'Sync Fathom meetings', () => {
@@ -139,6 +159,18 @@ export default class FathomSyncPlugin extends Plugin {
 			callback: () => this.syncAllMeetings(),
 		});
 
+		this.addCommand({
+			id: 'preview-attendee-links',
+			name: 'Preview attendee linking for all meeting notes',
+			callback: () => this.backfillAttendees('preview'),
+		});
+
+		this.addCommand({
+			id: 'link-attendees',
+			name: 'Link attendees in all meeting notes',
+			callback: () => this.backfillAttendees('apply'),
+		});
+
 		if (this.settings.syncOnStartup && this.settings.apiKey) {
 			// Delay to let vault fully load
 			this.registerInterval(
@@ -149,6 +181,8 @@ export default class FathomSyncPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings.selfEmails = [...(this.settings.selfEmails ?? [])];
+		this.settings.ignoredEmails = [...(this.settings.ignoredEmails ?? [])];
 	}
 
 	async saveSettings() {
@@ -330,7 +364,7 @@ export default class FathomSyncPlugin extends Plugin {
 
 		try {
 			const meetings = await this.fetchAllMeetings(since ?? undefined);
-			const { created, skipped } = await this.processMeetings(meetings);
+			const { created, skipped, notes } = await this.processMeetings(meetings);
 
 			// Update lastSyncedAt to the most recent meeting's created_at
 			if (meetings.length > 0) {
@@ -345,6 +379,7 @@ export default class FathomSyncPlugin extends Plugin {
 			const parts = [`${created} new`];
 			if (skipped > 0) parts.push(`${skipped} still processing`);
 			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
+			await this.linkSyncedNotes(notes);
 		} catch (e) {
 			new Notice(`Fathom Sync: Error — ${e instanceof Error ? e.message : String(e)}`);
 		}
@@ -358,7 +393,7 @@ export default class FathomSyncPlugin extends Plugin {
 		new Notice('Fathom Sync: Full re-sync — fetching all meetings...');
 		try {
 			const meetings = await this.fetchAllMeetings();
-			const { created, skipped } = await this.processMeetings(meetings);
+			const { created, skipped, notes } = await this.processMeetings(meetings);
 
 			if (meetings.length > 0) {
 				const latest = meetings
@@ -372,24 +407,79 @@ export default class FathomSyncPlugin extends Plugin {
 			const parts = [`${created} new`];
 			if (skipped > 0) parts.push(`${skipped} still processing`);
 			new Notice(`Fathom Sync: ${meetings.length} found, ${parts.join(', ')}.`);
+			await this.linkSyncedNotes(notes);
 		} catch (e) {
 			new Notice(`Fathom Sync: Error — ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
-	private async processMeetings(meetings: FathomMeeting[]): Promise<{ created: number; existed: number; skipped: number }> {
+	// ─── Attendee linking ────────────────────────────────────────────────
+
+	private async linkSyncedNotes(notes: MeetingInput[]) {
+		if (!this.settings.linkOnSync || notes.length === 0) return;
+		try {
+			const result = await this.linker.run(notes, 'apply', 'sync');
+			this.reportAndReview(result);
+		} catch (e) {
+			// Linking is an add-on: it must never fail the sync.
+			console.error('Fathom Sync: attendee linking failed', e);
+			new Notice('Fathom Sync: attendee linking failed. See the console.');
+		}
+	}
+
+	private async backfillAttendees(mode: 'preview' | 'apply') {
+		if (this.settings.selfEmails.length === 0) {
+			new Notice('Fathom Sync: set "Your emails" in settings before linking attendees.');
+			return;
+		}
+		const meetings = readMeetingNotes(this.app, this.settings.meetingFolder);
+		new Notice(`Fathom Sync: ${mode === 'preview' ? 'previewing' : 'linking'} attendees in ${meetings.length} meeting notes...`);
+		try {
+			const result = await this.linker.run(meetings, mode, 'backfill');
+			if (mode === 'preview') {
+				new Notice(`Fathom Sync preview: ${summaryLine(result.record)}. See ${this.settings.reportFolder}/attendee-link-preview.md`);
+				return;
+			}
+			this.reportAndReview(result);
+		} catch (e) {
+			console.error('Fathom Sync: attendee backfill failed', e);
+			new Notice(`Fathom Sync: attendee linking failed \u2014 ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	private reportAndReview(result: RunResult) {
+		new Notice(`Fathom Sync: ${summaryLine(result.record)}`);
+		if (result.plan.queue.length === 0) return;
+		new ReviewModal(this.app, result.plan.queue, async (selected, unselected) => {
+			try {
+				const record = await this.linker.approve(selected, unselected);
+				for (const email of record.ignored) {
+					if (!this.settings.ignoredEmails.includes(email)) this.settings.ignoredEmails.push(email);
+				}
+				await this.saveSettings();
+				new Notice(`Fathom Sync: ${summaryLine(record)}`);
+			} catch (e) {
+				console.error('Fathom Sync: review failed', e);
+				new Notice('Fathom Sync: creating reviewed contacts failed. See the console.');
+			}
+		}).open();
+	}
+
+	private async processMeetings(meetings: FathomMeeting[]): Promise<{ created: number; existed: number; skipped: number; notes: MeetingInput[] }> {
 		await this.ensureFolder(this.settings.meetingFolder);
 
 		let created = 0;
 		let existed = 0;
 		let skipped = 0;
+		const notes: MeetingInput[] = [];
 
 		for (let idx = 0; idx < meetings.length; idx++) {
 			const meeting = meetings[idx]!;
 			try {
-				const wasCreated = await this.createOrUpdateMeetingNote(meeting);
-				if (wasCreated) {
+				const note = await this.createOrUpdateMeetingNote(meeting);
+				if (note) {
 					created++;
+					notes.push(note);
 					// Throttle between new notes to avoid rate limits
 					// Each new note makes up to 2 API calls (summary + transcript),
 					// so space them out more generously
@@ -407,7 +497,7 @@ export default class FathomSyncPlugin extends Plugin {
 			}
 		}
 
-		return { created, existed, skipped };
+		return { created, existed, skipped, notes };
 	}
 
 	private async ensureFolder(path: string) {
@@ -433,13 +523,13 @@ export default class FathomSyncPlugin extends Plugin {
 		);
 	}
 
-	private async createOrUpdateMeetingNote(meeting: FathomMeeting): Promise<boolean> {
+	private async createOrUpdateMeetingNote(meeting: FathomMeeting): Promise<MeetingInput | null> {
 		const filename = this.buildFilename(meeting);
 		const filePath = `${this.settings.meetingFolder}/${filename}.md`;
 
 		// Skip if file already exists
 		const existing = this.app.vault.getAbstractFileByPath(filePath);
-		if (existing) return false;
+		if (existing) return null;
 
 		// Fetch detailed data per-recording via dedicated endpoints
 		let summary: string | null = null;
@@ -458,7 +548,11 @@ export default class FathomSyncPlugin extends Plugin {
 
 		const content = this.buildNoteContent(meeting, summary, transcript, actionItems);
 		await this.app.vault.create(filePath, content);
-		return true;
+		return {
+			path: filePath,
+			attendees: (meeting.calendar_invitees ?? []).map(inv => ({ name: inv.name ?? '', email: inv.email ?? '' })),
+			recordedByEmail: meeting.recorded_by?.email,
+		};
 	}
 
 	private buildNoteContent(
@@ -565,7 +659,7 @@ export default class FathomSyncPlugin extends Plugin {
 // ─── Settings Tab ───────────────────────────────────────────────────────────
 
 // Settings stored as vault paths: no leading or trailing slash.
-const PATH_KEYS = ['meetingFolder'];
+const PATH_KEYS = ['meetingFolder', 'contactsFolder', 'directoryCsvPath', 'reportFolder'];
 
 class FathomSyncSettingTab extends PluginSettingTab {
 	plugin: FathomSyncPlugin;
@@ -575,8 +669,15 @@ class FathomSyncSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	getControlValue(key: string): unknown {
+		if (key === 'selfEmails') return this.plugin.settings.selfEmails.join('\n');
+		return super.getControlValue(key);
+	}
+
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		if (PATH_KEYS.includes(key)) value = String(value).trim().replace(/^\/|\/$/g, '');
+		if (key === 'directoryOrg') value = String(value).trim();
+		if (key === 'selfEmails') value = String(value).split('\n').map((s) => s.trim()).filter(Boolean);
 		await super.setControlValue(key, value);
 	}
 
@@ -639,6 +740,66 @@ class FathomSyncSettingTab extends PluginSettingTab {
 				name: 'Sync on startup',
 				desc: 'Automatically sync the last 7 days of meetings when Obsidian starts.',
 				control: { type: 'toggle', key: 'syncOnStartup' },
+			},
+			{
+				type: 'page',
+				name: 'Attendee linking',
+				desc: 'Link meeting attendees to Contact records by email.',
+				// Preview and backfill refuse to run until Your emails is set.
+				status: () => (this.plugin.settings.selfEmails.length ? null : 'warning'),
+				items: [
+					{
+						name: 'Link attendees on sync',
+						desc: 'After each sync, add Related: [[Name]] lines for attendees with a Contact record.',
+						control: { type: 'toggle', key: 'linkOnSync' },
+					},
+					{
+						name: 'Your emails',
+						desc: 'One per line. Never linked. Required before Preview or Link attendees will run.',
+						aliases: ['self emails', 'my email'],
+						control: {
+							type: 'textarea',
+							key: 'selfEmails',
+							rows: 3,
+							validate: (v) => {
+								const bad = v.split('\n').map((s) => s.trim()).filter((s) => s && !s.includes('@'));
+								return bad.length ? `Not an email: ${bad.join(', ')}` : undefined;
+							},
+						},
+					},
+					{
+						name: 'Contacts folder',
+						desc: 'Folder holding person and organization records.',
+						control: { type: 'folder', key: 'contactsFolder' },
+					},
+					{
+						name: 'Directory CSV path',
+						desc: 'Faculty-staff directory export used to create Maryville contacts.',
+						aliases: ['faculty staff directory'],
+						control: { type: 'file', key: 'directoryCsvPath', filter: (f) => f.extension === 'csv' },
+					},
+					{
+						name: 'Directory organization',
+						desc: 'Organization written on contacts created from the directory.',
+						control: { type: 'text', key: 'directoryOrg' },
+					},
+					{
+						name: 'Report folder',
+						desc: 'Where the preview and the run log are written.',
+						control: { type: 'folder', key: 'reportFolder' },
+					},
+					{
+						type: 'list',
+						heading: 'Ignored emails',
+						emptyState: 'Nobody ignored. The review modal adds people here; delete one to be asked about them again.',
+						items: this.plugin.settings.ignoredEmails.map((email) => ({ name: email })),
+						onDelete: async (index) => {
+							this.plugin.settings.ignoredEmails.splice(index, 1);
+							await this.plugin.saveSettings();
+							this.update();
+						},
+					},
+				],
 			},
 		];
 	}
