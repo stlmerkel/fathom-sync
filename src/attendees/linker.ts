@@ -186,6 +186,18 @@ export class AttendeeLinker {
 		else await this.app.vault.create(path, `# Attendee link log\n\n${section}`);
 	}
 
+	/** Write the log; on failure keep the change list recoverable from the console and never throw. */
+	private async safeAppendLog(record: RunRecord): Promise<void> {
+		try {
+			await this.appendLog(record);
+		} catch (e) {
+			const path = normalizePath(`${this.settings().reportFolder}/${LOG_FILE}`);
+			console.error('Fathom Sync: could not write the attendee link log', e);
+			console.error(renderLogSection(record));
+			record.failed.push({ path, error: e instanceof Error ? e.message : String(e) });
+		}
+	}
+
 	async run(meetings: MeetingInput[], mode: 'preview' | 'apply', title: string): Promise<RunResult> {
 		const s = this.settings();
 		const index = buildIndex(this.app, s.contactsFolder);
@@ -221,7 +233,7 @@ export class AttendeeLinker {
 			}
 		}
 		await this.applyLinks(p.links, record, true);
-		await this.appendLog(record);
+		await this.safeAppendLog(record);
 		return { record, plan: p };
 	}
 
@@ -243,7 +255,7 @@ export class AttendeeLinker {
 		record.ignored = unselected.filter(q => q.kind === 'external').map(q => q.email);
 
 		await this.applyLinks(links, record, true);
-		await this.appendLog(record);
+		await this.safeAppendLog(record);
 		return record;
 	}
 }
