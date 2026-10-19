@@ -27,10 +27,10 @@ export function summaryLine(r: RunRecord): string {
 }
 
 function queuedLine(q: QueuedPerson): string {
-	const bits = [`${q.basename} <${q.email}>`];
+	const bits = [q.basename ? `${q.basename} <${q.email}>` : `<${q.email}>`];
 	if (q.org) bits.push(q.org);
 	bits.push(`${q.meetings.length} meeting${q.meetings.length === 1 ? '' : 's'}`);
-	if (q.kind === 'collision') bits.push(`name taken${q.existingPath ? ` by \`${q.existingPath}\`` : ' in this run'}`);
+	if (q.kind === 'collision') bits.push(q.basename === '' ? 'no usable name' : `name taken${q.existingPath ? ` by \`${q.existingPath}\`` : ' in this run'}`);
 	return `- ${bits.join(' · ')}`;
 }
 

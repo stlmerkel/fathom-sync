@@ -55,6 +55,16 @@ describe('renderLogSection', () => {
 	});
 });
 
+describe('collision lines', () => {
+	it('shows the email and "no usable name" when the basename is empty', () => {
+		const r = emptyRecord('sync', 'x', true);
+		r.queued.push({ ...queued, kind: 'collision', basename: '', email: 'ghost@vendor.com', org: null, meetings: ['m/a.md'] });
+		const out = renderLogSection(r);
+		expect(out).toContain('- <ghost@vendor.com> · 1 meeting · no usable name');
+		expect(out).not.toContain('in this run');
+	});
+});
+
 describe('renderPreview', () => {
 	it('is a standalone note that says nothing was written', () => {
 		const out = renderPreview(sample());

@@ -28,7 +28,9 @@ export class ReviewModal extends Modal {
 			const ul = contentEl.createEl('ul');
 			for (const q of collisions) {
 				ul.createEl('li', {
-					text: `${q.basename} <${q.email}>${q.existingPath ? ` · existing: ${q.existingPath}` : ' · name used twice in this run'}`,
+					text: q.basename === ''
+						? `<${q.email}> · no usable name`
+						: `${q.basename} <${q.email}>${q.existingPath ? ` · existing: ${q.existingPath}` : ' · name used twice in this run'}`,
 				});
 			}
 		}
