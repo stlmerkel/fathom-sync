@@ -32,18 +32,13 @@ function buildIndex(app: App, contactsFolder: string): ContactIndex {
 	const index: ContactIndex = { byEmail: new Map(), byName: new Map(), orgByDomain: new Map(), orgNames: new Set() };
 	for (const file of filesUnder(app, contactsFolder)) {
 		const fm = app.metadataCache.getFileCache(file)?.frontmatter;
-		if (!fm) {
-			// Cache not ready (just created, or changed externally): report a collision rather than a create.
-			index.byName.set(file.basename.toLowerCase(), { basename: file.basename, path: file.path, email: '' });
-			continue;
-		}
 		const docType: unknown = fm?.['document_type'];
-		const type = typeof docType === 'string' ? docType.trim() : '';
-		if (type === 'contact') {
-			const email = normalizeEmail(fm?.['email']);
-			if (email) index.byEmail.set(email, file.basename);
-			index.byName.set(file.basename.toLowerCase(), { basename: file.basename, path: file.path, email });
-		} else if (type === 'organization') {
+		const type = typeof docType === 'string' ? docType.trim().toLowerCase() : '';
+		const email = type === 'contact' ? normalizeEmail(fm?.['email']) : '';
+		// Every file in the folder holds its name, whatever its frontmatter says (or if the cache isn't ready).
+		index.byName.set(file.basename.toLowerCase(), { basename: file.basename, path: file.path, email });
+		if (email) index.byEmail.set(email, file.basename);
+		if (type === 'organization') {
 			index.orgNames.add(file.basename.toLowerCase());
 			const domain = domainFromWebsite(fm?.['website']);
 			if (domain) index.orgByDomain.set(domain, file.basename);
@@ -114,11 +109,18 @@ export class AttendeeLinker {
 		};
 	}
 
+	/** True if a file exists at `path`, compared case-insensitively (macOS filesystems are). */
+	private pathTaken(path: string): boolean {
+		if (this.app.vault.getAbstractFileByPath(path)) return true;
+		const lower = path.toLowerCase();
+		return filesUnder(this.app, this.settings().contactsFolder).some(f => f.path.toLowerCase() === lower);
+	}
+
 	/** Create a contact note; returns false (and records a failure) if the file already exists. */
 	private async createContact(contact: NewContact, basename: string, record: RunRecord,
 		source: 'directory' | 'attendee'): Promise<boolean> {
 		const path = normalizePath(`${this.settings().contactsFolder}/${basename}.md`);
-		if (this.app.vault.getAbstractFileByPath(path)) {
+		if (this.pathTaken(path)) {
 			record.failed.push({ path, error: 'contact file already exists; not overwritten' });
 			return false;
 		}
@@ -197,7 +199,11 @@ export class AttendeeLinker {
 		record.queued = p.queue;
 
 		if (mode === 'preview') {
-			record.created = p.creates.map(c => ({ basename: c.basename, source: 'directory' as const }));
+			for (const c of p.creates) {
+				const path = normalizePath(`${s.contactsFolder}/${c.basename}.md`);
+				if (this.pathTaken(path)) record.failed.push({ path, error: 'contact file already exists; not overwritten' });
+				else record.created.push({ basename: c.basename, source: 'directory' });
+			}
 			await this.applyLinks(p.links, record, false);
 			await this.writePreview(record);
 			return { record, plan: p };
