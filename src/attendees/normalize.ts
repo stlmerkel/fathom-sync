@@ -17,6 +17,12 @@ export function normalizeEmail(value: unknown): string {
 	return /^[^\s@<>,;"]+@[^\s@<>,;"]+$/.test(v) ? v : '';
 }
 
+/** Every usable address in a frontmatter value written as a string or a list. */
+export function emailsOf(value: unknown): string[] {
+	const values: unknown[] = Array.isArray(value) ? value : [value];
+	return values.map(normalizeEmail).filter(Boolean);
+}
+
 export function domainOf(email: string): string {
 	const at = email.lastIndexOf('@');
 	return at === -1 ? '' : email.slice(at + 1).toLowerCase();

@@ -23,7 +23,7 @@ export class ReviewModal extends Modal {
 		if (collisions.length) {
 			contentEl.createEl('h3', { text: `Name collisions (${collisions.length})` });
 			contentEl.createEl('p', {
-				text: 'A contact file with this name already exists. Resolve by hand, for example by adding the email to the existing record. These will be listed again next run.',
+				text: 'A contact file with this name already exists. Resolve by hand: if it is the same person, add this address to secondary_email on the existing record. These will be listed again next run.',
 			});
 			const ul = contentEl.createEl('ul');
 			for (const q of collisions) {

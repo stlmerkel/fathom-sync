@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { domainFromWebsite, domainOf, normalizeEmail } from '../src/attendees/normalize';
+import { domainFromWebsite, domainOf, emailsOf, normalizeEmail } from '../src/attendees/normalize';
 
 describe('normalizeEmail', () => {
 	it('trims and lowercases', () => {
@@ -60,5 +60,23 @@ describe('normalizeEmail rejects non-address shapes', () => {
 	});
 	it("keeps an apostrophe in the local part", () => {
 		expect(normalizeEmail("O'Brien@Maryville.edu")).toBe("o'brien@maryville.edu");
+	});
+});
+
+// Review F1/F2: contacts carry `email` and `secondary_email`, as a string or a list.
+describe('emailsOf', () => {
+	it('reads a single string', () => {
+		expect(emailsOf('PKomarny@Maryville.edu')).toEqual(['pkomarny@maryville.edu']);
+	});
+	it('reads every usable entry of a list', () => {
+		expect(emailsOf(['komarny@maryville.edu', "'pkomarny@maryville.edu'", '', 42])).toEqual([
+			'komarny@maryville.edu',
+			'pkomarny@maryville.edu',
+		]);
+	});
+	it('returns nothing for blanks and non-addresses', () => {
+		expect(emailsOf(undefined)).toEqual([]);
+		expect(emailsOf('')).toEqual([]);
+		expect(emailsOf('Phil Komarny')).toEqual([]);
 	});
 });

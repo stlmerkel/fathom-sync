@@ -1,7 +1,7 @@
 import { App, TFile, TFolder, moment, normalizePath } from 'obsidian';
 import { renderContact, type NewContact } from './contactTemplate';
 import { parseDirectory, type DirectoryPerson } from './directory';
-import { domainFromWebsite, normalizeEmail } from './normalize';
+import { domainFromWebsite, emailsOf } from './normalize';
 import { plan, type ContactIndex, type LinkPlan, type MeetingInput, type QueuedPerson } from './planner';
 import { insertRelatedLines } from './related';
 import { emptyRecord, renderLogSection, renderPreview, type RunRecord } from './report';
@@ -34,10 +34,11 @@ function buildIndex(app: App, contactsFolder: string): ContactIndex {
 		const fm = app.metadataCache.getFileCache(file)?.frontmatter;
 		const docType: unknown = fm?.['document_type'];
 		const type = typeof docType === 'string' ? docType.trim().toLowerCase() : '';
-		const email = type === 'contact' ? normalizeEmail(fm?.['email']) : '';
+		// A contact can carry several addresses: `email` and `secondary_email`, each a string or a list.
+		const emails = type === 'contact' ? [...emailsOf(fm?.['email']), ...emailsOf(fm?.['secondary_email'])] : [];
 		// Every file in the folder holds its name, whatever its frontmatter says (or if the cache isn't ready).
-		index.byName.set(file.basename.toLowerCase(), { basename: file.basename, path: file.path, email });
-		if (email) index.byEmail.set(email, file.basename);
+		index.byName.set(file.basename.toLowerCase(), { basename: file.basename, path: file.path, email: emails[0] ?? '' });
+		for (const email of emails) index.byEmail.set(email, file.basename);
 		if (type === 'organization') {
 			index.orgNames.add(file.basename.toLowerCase());
 			const domain = domainFromWebsite(fm?.['website']);
