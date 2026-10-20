@@ -77,3 +77,14 @@ describe('malformed directory CSV', () => {
 		expect(() => parseDirectory(csv)).toThrow(/row 3/);
 	});
 });
+
+// Preview on the real vault: the export writes apostrophes as &#039;.
+describe('numeric character references', () => {
+	it('decodes zero-padded decimal and hex references', () => {
+		expect(decodeEntities('Adrianne O&#039;Keefe')).toBe("Adrianne O'Keefe");
+		expect(decodeEntities('O&#x27;Keefe &#8217;')).toBe("O'Keefe ’");
+	});
+	it('leaves an unknown named entity alone', () => {
+		expect(decodeEntities('&nbspx &bogus;')).toBe('&nbspx &bogus;');
+	});
+});

@@ -59,11 +59,15 @@ const ENTITIES: Record<string, string> = {
 	'&gt;': '>',
 	'&quot;': '"',
 	'&apos;': "'",
-	'&#39;': "'",
 };
 
+/** Decode the named entities above and any numeric reference (`&#039;`, `&#x27;`). */
 export function decodeEntities(s: string): string {
-	return s.replace(/&(amp|lt|gt|quot|apos|#39);/g, m => ENTITIES[m] ?? m);
+	return s.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|amp|lt|gt|quot|apos);/g, (m, e: string) => {
+		if (!e.startsWith('#')) return ENTITIES[m] ?? m;
+		const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+		return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+	});
 }
 
 export function parseDirectory(text: string): Map<string, DirectoryPerson> {
