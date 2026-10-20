@@ -78,7 +78,17 @@ export function readMeetingNotes(app: App, folder: string): MeetingInput[] {
 }
 
 export class AttendeeLinker {
+	// Writing runs (apply, approve) run one at a time: a sync or review that starts during a long
+	// backfill waits for it, so the two never share the journal or plan against half-written state.
+	private writes: Promise<unknown> = Promise.resolve();
+
 	constructor(private app: App, private settings: () => LinkerSettings) {}
+
+	private serialize<T>(work: () => Promise<T>): Promise<T> {
+		const next = this.writes.then(work);
+		this.writes = next.catch(() => undefined);
+		return next;
+	}
 
 	private now(): string {
 		return moment().format('YYYY-MM-DD HH:mm');
@@ -247,7 +257,11 @@ export class AttendeeLinker {
 		}
 	}
 
-	async run(meetings: MeetingInput[], mode: 'preview' | 'apply', title: string): Promise<RunResult> {
+	run(meetings: MeetingInput[], mode: 'preview' | 'apply', title: string): Promise<RunResult> {
+		return mode === 'preview' ? this.runNow(meetings, mode, title) : this.serialize(() => this.runNow(meetings, mode, title));
+	}
+
+	private async runNow(meetings: MeetingInput[], mode: 'preview' | 'apply', title: string): Promise<RunResult> {
 		const s = this.settings();
 		const index = buildIndex(this.app, s.contactsFolder);
 		const directory = await loadDirectory(this.app, s.directoryCsvPath);
@@ -288,7 +302,11 @@ export class AttendeeLinker {
 		return { record, plan: p };
 	}
 
-	async approve(selected: QueuedPerson[], unselected: QueuedPerson[]): Promise<RunRecord> {
+	approve(selected: QueuedPerson[], unselected: QueuedPerson[]): Promise<RunRecord> {
+		return this.serialize(() => this.approveNow(selected, unselected));
+	}
+
+	private async approveNow(selected: QueuedPerson[], unselected: QueuedPerson[]): Promise<RunRecord> {
 		const index = buildIndex(this.app, this.settings().contactsFolder);
 		const record = emptyRecord('review', this.now(), true);
 		const links = new Map<string, string[]>();
