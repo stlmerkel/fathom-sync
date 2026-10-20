@@ -88,7 +88,8 @@ interface FathomTranscriptResponse {
 // ─── Settings ───────────────────────────────────────────────────────────────
 
 interface FathomSyncSettings {
-	apiKey: string;
+	// ID of the API key in app.secretStorage; the key itself is never in data.json.
+	apiKeySecret: string;
 	meetingFolder: string;
 	includeTranscript: boolean;
 	includeSummary: boolean;
@@ -106,7 +107,7 @@ interface FathomSyncSettings {
 }
 
 const DEFAULT_SETTINGS: FathomSyncSettings = {
-	apiKey: '',
+	apiKeySecret: '',
 	meetingFolder: 'Meetings/Fathom',
 	includeTranscript: true,
 	includeSummary: true,
@@ -171,7 +172,7 @@ export default class FathomSyncPlugin extends Plugin {
 			callback: () => this.backfillAttendees('apply'),
 		});
 
-		if (this.settings.syncOnStartup && this.settings.apiKey) {
+		if (this.settings.syncOnStartup && this.apiKey()) {
 			// Delay to let vault fully load
 			this.registerInterval(
 				window.setTimeout(() => this.syncNewMeetings(), 5000) as unknown as number
@@ -180,9 +181,25 @@ export default class FathomSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = await this.loadData();
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 		this.settings.selfEmails = [...(this.settings.selfEmails ?? [])];
 		this.settings.ignoredEmails = [...(this.settings.ignoredEmails ?? [])];
+
+		// Up to 1.5.x the key was stored in plain text in data.json. Move it to secret storage once.
+		const legacyKey: unknown = data?.apiKey;
+		if (typeof legacyKey === 'string') {
+			if (legacyKey && !this.settings.apiKeySecret) {
+				this.app.secretStorage.setSecret('fathom-api-key', legacyKey);
+				this.settings.apiKeySecret = 'fathom-api-key';
+			}
+			delete (this.settings as Partial<{ apiKey: string }>).apiKey;
+			await this.saveSettings();
+		}
+	}
+
+	private apiKey(): string {
+		return this.settings.apiKeySecret ? this.app.secretStorage.getSecret(this.settings.apiKeySecret) ?? '' : '';
 	}
 
 	async saveSettings() {
@@ -205,7 +222,7 @@ export default class FathomSyncPlugin extends Plugin {
 			try {
 				resp = await requestUrl({
 					url: url.toString(),
-					headers: { 'X-Api-Key': this.settings.apiKey },
+					headers: { 'X-Api-Key': this.apiKey() },
 					throw: false,
 				});
 			} catch (e: unknown) {
@@ -341,7 +358,7 @@ export default class FathomSyncPlugin extends Plugin {
 	// ─── Sync logic ───────────────────────────────────────────────────────
 
 	async syncNewMeetings() {
-		if (!this.settings.apiKey) {
+		if (!this.apiKey()) {
 			new Notice('Fathom Sync: Please set your API key in settings.');
 			return;
 		}
@@ -389,7 +406,7 @@ export default class FathomSyncPlugin extends Plugin {
 	}
 
 	async syncAllMeetings() {
-		if (!this.settings.apiKey) {
+		if (!this.apiKey()) {
 			new Notice('Fathom Sync: Please set your API key in settings.');
 			return;
 		}
@@ -690,20 +707,9 @@ class FathomSyncSettingTab extends PluginSettingTab {
 		return [
 			{
 				name: 'API key',
-				desc: 'Your Fathom API key (found in Fathom → Settings → Integrations).',
-				aliases: ['token', 'Fathom key'],
-				render: (setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder('Enter your Fathom API key')
-							.setValue(this.plugin.settings.apiKey)
-							.then((t) => { t.inputEl.type = 'password'; })
-							.onChange(async (value) => {
-								this.plugin.settings.apiKey = value;
-								await this.plugin.saveSettings();
-							})
-					);
-				},
+				desc: "Your Fathom API key (found in Fathom → Settings → Integrations). Kept in Obsidian's secret storage on this device, not in the plugin's data.json.",
+				aliases: ['token', 'Fathom key', 'secret'],
+				control: { type: 'secret', key: 'apiKeySecret' },
 			},
 			{
 				name: 'Meeting folder',

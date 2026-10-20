@@ -16,7 +16,7 @@ This plugin was 100% vibe coded. This is only intended for my personal use and I
 
 ## Requirements
 
-Obsidian 1.13 or later.
+Obsidian 1.13.2 or later.
 
 ## Installation
 
@@ -47,14 +47,14 @@ Use the [Hot-Reload plugin](https://github.com/pjeby/hot-reload) in your dev vau
 
 1. Get your Fathom API key from **Fathom → Settings → Integrations**
 2. Open **Obsidian → Settings → Fathom Sync**
-3. Paste your API key
+3. Set your API key under **API key** (Obsidian keeps it in its secret storage)
 4. Configure the meeting folder and other options as needed
 
 ## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **API key** | — | Your Fathom API key (stored as a password field) |
+| **API key** | — | Your Fathom API key, kept in Obsidian's secret storage on this device (not in `data.json`). A key saved by 1.5.x or earlier moves there automatically on first load. |
 | **Meeting folder** | `Meetings/Fathom` | Vault path where meeting notes are created |
 | **File name format** | `{{date}} — {{title}}` | Template for note filenames (see [placeholders](#file-name-placeholders)) |
 | **Include summary** | On | Fetch and embed the AI-generated summary |
