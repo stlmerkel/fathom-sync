@@ -22,6 +22,9 @@ export interface RunResult {
 
 const PREVIEW_FILE = 'attendee-link-preview.md';
 const LOG_FILE = 'attendee-link-log.md';
+// Written line by line during a writing run and removed when it finishes, so an interrupted
+// run still leaves a record of what it changed (folded into the log by the next run).
+const JOURNAL_FILE = 'attendee-link-journal.md';
 
 function filesUnder(app: App, folder: string): TFile[] {
 	const prefix = normalizePath(folder) + '/';
@@ -129,6 +132,7 @@ export class AttendeeLinker {
 			await this.ensureFolder(this.settings().contactsFolder);
 			await this.app.vault.create(path, renderContact(contact));
 			record.created.push({ basename, source });
+			await this.journal(`- [[${basename}]] (${source})`);
 			return true;
 		} catch (e) {
 			record.failed.push({ path, error: e instanceof Error ? e.message : String(e) });
@@ -161,7 +165,10 @@ export class AttendeeLinker {
 					hasFrontmatter = r.hasFrontmatter;
 				}
 				if (!hasFrontmatter) record.failed.push({ path, error: 'no frontmatter' });
-				else if (added.length) record.changed.push({ path, added });
+				else if (added.length) {
+					record.changed.push({ path, added });
+					if (write) await this.journal([`- \`${path}\``, ...added.map(n => `  - \`Related: [[${n}]]\``)].join('\n'));
+				}
 			} catch (e) {
 				record.failed.push({ path, error: e instanceof Error ? e.message : String(e) });
 			}
@@ -178,24 +185,65 @@ export class AttendeeLinker {
 	}
 
 	private async appendLog(record: RunRecord): Promise<void> {
+		await this.appendLogText(renderLogSection(record));
+	}
+
+	private async appendLogText(section: string): Promise<void> {
 		const folder = this.settings().reportFolder;
 		await this.ensureFolder(folder);
 		const path = normalizePath(`${folder}/${LOG_FILE}`);
-		const section = renderLogSection(record);
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) await this.app.vault.process(existing, c => `${c.replace(/\s+$/, '')}\n\n${section}`);
 		else await this.app.vault.create(path, `# Attendee link log\n\n${section}`);
 	}
 
+	private journalPath(): string {
+		return normalizePath(`${this.settings().reportFolder}/${JOURNAL_FILE}`);
+	}
+
+	/** Start a writing run's journal, first moving any journal an interrupted run left into the log. */
+	private async startJournal(record: RunRecord): Promise<void> {
+		const adapter = this.app.vault.adapter;
+		const path = this.journalPath();
+		try {
+			await this.ensureFolder(this.settings().reportFolder);
+			if (await adapter.exists(path)) {
+				const left = (await adapter.read(path)).trim();
+				if (left) await this.appendLogText(`## ${this.now()} — interrupted run, recovered from the journal\n\n${left}\n`);
+			}
+			await adapter.write(path, `Run ${record.title} started ${record.when}. Each change is listed as it is written.\n\n`);
+		} catch (e) {
+			console.error('Fathom Sync: could not start the attendee link journal', e);
+		}
+	}
+
+	private async journal(entry: string): Promise<void> {
+		try {
+			await this.app.vault.adapter.append(this.journalPath(), `${entry}\n`);
+		} catch (e) {
+			console.error('Fathom Sync: could not write the attendee link journal', e, entry);
+		}
+	}
+
+	private async endJournal(): Promise<void> {
+		try {
+			await this.app.vault.adapter.remove(this.journalPath());
+		} catch (e) {
+			console.error('Fathom Sync: could not remove the attendee link journal', e);
+		}
+	}
+
 	/** Write the log; on failure keep the change list recoverable from the console and never throw. */
-	private async safeAppendLog(record: RunRecord): Promise<void> {
+	private async safeAppendLog(record: RunRecord): Promise<boolean> {
 		try {
 			await this.appendLog(record);
+			return true;
 		} catch (e) {
 			const path = normalizePath(`${this.settings().reportFolder}/${LOG_FILE}`);
 			console.error('Fathom Sync: could not write the attendee link log', e);
 			console.error(renderLogSection(record));
 			record.failed.push({ path, error: e instanceof Error ? e.message : String(e) });
+			return false;
 		}
 	}
 
@@ -222,6 +270,7 @@ export class AttendeeLinker {
 			return { record, plan: p };
 		}
 
+		await this.startJournal(record);
 		for (const c of p.creates) {
 			const contact = this.contactFor(c.basename, c.email, c.person.firstName, c.person.lastName, c.person, null, index);
 			const ok = await this.createContact(contact, c.basename, record, 'directory');
@@ -234,7 +283,8 @@ export class AttendeeLinker {
 			}
 		}
 		await this.applyLinks(p.links, record, true);
-		await this.safeAppendLog(record);
+		// Keep the journal if the log could not be written: the next run recovers it.
+		if (await this.safeAppendLog(record)) await this.endJournal();
 		return { record, plan: p };
 	}
 
@@ -242,6 +292,7 @@ export class AttendeeLinker {
 		const index = buildIndex(this.app, this.settings().contactsFolder);
 		const record = emptyRecord('review', this.now(), true);
 		const links = new Map<string, string[]>();
+		await this.startJournal(record);
 
 		for (const q of selected) {
 			if (q.kind !== 'external') continue;
@@ -256,7 +307,7 @@ export class AttendeeLinker {
 		record.ignored = unselected.filter(q => q.kind === 'external').map(q => q.email);
 
 		await this.applyLinks(links, record, true);
-		await this.safeAppendLog(record);
+		if (await this.safeAppendLog(record)) await this.endJournal();
 		return record;
 	}
 }
