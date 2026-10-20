@@ -9,3 +9,7 @@ npm-debug.log*
 
 /.mcp.json
 solo.yml
+/.claude/
+/CLAUDE.md
+/docs/
+/solo.yml
