@@ -63,3 +63,17 @@ describe('parseDirectory', () => {
 		expect(parseDirectory('"firstName","lastName"\nA,B').size).toBe(0);
 	});
 });
+
+// Review F5: a half-synced export must not become trusted directory data.
+describe('malformed directory CSV', () => {
+	it('parseCsv rejects an unterminated quoted field', () => {
+		expect(() => parseCsv('a,b\n1,"open')).toThrow(/unterminated/i);
+	});
+	it('parseDirectory rejects a file cut off inside a quoted field', () => {
+		expect(() => parseDirectory('email,firstName,lastName\npat@uni.edu,"Pat,Lee')).toThrow();
+	});
+	it('parseDirectory rejects a data row whose field count differs from the header', () => {
+		const csv = ['email,firstName,lastName', 'a@x.edu,A,One', 'b@x.edu,B'].join('\n');
+		expect(() => parseDirectory(csv)).toThrow(/row 3/);
+	});
+});

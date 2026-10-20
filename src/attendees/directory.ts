@@ -10,7 +10,7 @@ export interface DirectoryPerson {
 	terminated: boolean;
 }
 
-/** RFC 4180-style CSV: quoted fields, doubled quotes, CRLF or LF rows. */
+/** RFC 4180-style CSV: quoted fields, doubled quotes, CRLF or LF rows. Throws on an unterminated quote. */
 export function parseCsv(text: string): string[][] {
 	const rows: string[][] = [];
 	let row: string[] = [];
@@ -45,6 +45,7 @@ export function parseCsv(text: string): string[][] {
 			field += c;
 		}
 	}
+	if (inQuotes) throw new Error('CSV ends inside an unterminated quoted field');
 	if (field !== '' || row.length > 0) {
 		row.push(field);
 		rows.push(row);
@@ -84,6 +85,11 @@ export function parseDirectory(text: string): Map<string, DirectoryPerson> {
 	if (idx.email === -1) return out;
 
 	const get = (r: string[], i: number) => (i === -1 ? '' : decodeEntities((r[i] ?? '').trim()));
+
+	rows.forEach((r, i) => {
+		// A short or long row means a truncated or corrupted export: refuse the whole file.
+		if (r.length !== header.length) throw new Error(`CSV row ${i + 1} has ${r.length} fields, header has ${header.length}`);
+	});
 
 	for (const r of rows.slice(1)) {
 		const email = normalizeEmail(get(r, idx.email));
