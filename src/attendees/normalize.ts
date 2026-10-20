@@ -7,13 +7,14 @@ function unquote(s: string): string {
 // Control chars, NBSP, zero-width and BOM survive trim() (lessons L31). Spelled out
 // rather than \p{C}\p{Z} because tsconfig targets ES6. Always as \u escapes: a literal
 // U+2028/U+2029 is a line terminator and would end the regex literal mid-class.
-const INVISIBLE = /[\u0000-\u001F\u007F-\u00A0\u200B-\u200F\u2028\u2029\u202F\u2060\uFEFF\s]/g;
+const INVISIBLE = /[\u0000-\u001F\u007F-\u00A0\u200B-\u200F\u2028\u2029\u202F\u2060\uFEFF]/g;
 
 /** Lowercased, stripped email, or '' when the value isn't a usable address. */
 export function normalizeEmail(value: unknown): string {
 	if (typeof value !== 'string') return '';
 	const v = unquote(value).replace(INVISIBLE, '').toLowerCase();
-	return /^[^@]+@[^@]+$/.test(v) ? v : '';
+	// No whitespace, angle brackets or list separators: 'Name <a@b>' and 'a@b, c@d' are not addresses.
+	return /^[^\s@<>,;"]+@[^\s@<>,;"]+$/.test(v) ? v : '';
 }
 
 export function domainOf(email: string): string {

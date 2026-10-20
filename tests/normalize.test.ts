@@ -47,3 +47,18 @@ describe('domainFromWebsite', () => {
 		expect(domainFromWebsite('')).toBe('');
 	});
 });
+// Review F3: display-name forms and lists must not pass as an address.
+describe('normalizeEmail rejects non-address shapes', () => {
+	it.each([
+		['Brian Merkel <bmerkel@maryville.edu>'],
+		['a@x.edu, b@y.edu'],
+		['a@x.edu; b@y.edu'],
+		['first last@x.edu'],
+		['<bmerkel@maryville.edu>'],
+	])('%s → empty', input => {
+		expect(normalizeEmail(input)).toBe('');
+	});
+	it("keeps an apostrophe in the local part", () => {
+		expect(normalizeEmail("O'Brien@Maryville.edu")).toBe("o'brien@maryville.edu");
+	});
+});

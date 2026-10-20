@@ -1,6 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, TFolder, moment, requestUrl, type SettingDefinitionItem } from 'obsidian';
 import { AttendeeLinker, readMeetingNotes, type RunResult } from './attendees/linker';
 import type { MeetingInput } from './attendees/planner';
+import { normalizeEmail } from './attendees/normalize';
 import { summaryLine } from './attendees/report';
 import { ReviewModal } from './attendees/ReviewModal';
 
@@ -451,7 +452,8 @@ export default class FathomSyncPlugin extends Plugin {
 	}
 
 	private async backfillAttendees(mode: 'preview' | 'apply') {
-		if (this.settings.selfEmails.length === 0) {
+		// Check what the planner will actually match on, not the raw setting.
+		if (!this.settings.selfEmails.some((e) => normalizeEmail(e))) {
 			new Notice('Fathom Sync: set "Your emails" in settings before linking attendees.');
 			return;
 		}
@@ -699,7 +701,7 @@ class FathomSyncSettingTab extends PluginSettingTab {
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		if (PATH_KEYS.includes(key)) value = String(value).trim().replace(/^\/|\/$/g, '');
 		if (key === 'directoryOrg') value = String(value).trim();
-		if (key === 'selfEmails') value = String(value).split('\n').map((s) => s.trim()).filter(Boolean);
+		if (key === 'selfEmails') value = String(value).split('\n').map(normalizeEmail).filter(Boolean);
 		await super.setControlValue(key, value);
 	}
 
@@ -773,7 +775,7 @@ class FathomSyncSettingTab extends PluginSettingTab {
 							key: 'selfEmails',
 							rows: 3,
 							validate: (v) => {
-								const bad = v.split('\n').map((s) => s.trim()).filter((s) => s && !s.includes('@'));
+								const bad = v.split('\n').map((s) => s.trim()).filter((s) => s && !normalizeEmail(s));
 								return bad.length ? `Not an email: ${bad.join(', ')}` : undefined;
 							},
 						},
